@@ -63,6 +63,17 @@ export class TorneosController {
       next(error);
     }
   }
+
+  async delete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const adminId = req.user!.id;
+      const result = await torneosService.delete(id, adminId);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const torneosController = new TorneosController();

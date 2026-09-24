@@ -359,6 +359,49 @@ export class TorneosService {
         .sort((a, b) => a.numero_fecha - b.numero_fecha);
     }
   }
+
+  /**
+   * RF-07 / Admin: Eliminación de torneo y datos asociados
+   */
+  async delete(id: number, adminId: number) {
+    const torneo = await this.getById(id);
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      // En MySQL las foreign keys fk_partido_torneo y fk_equipo_torneo tienen ON DELETE CASCADE
+      await pool.query('DELETE FROM torneo WHERE id = ?', [id]);
+
+      await pool.query(
+        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "ELIMINAR_TORNEO", "torneo", ?, ?)',
+        [adminId, id, JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte })]
+      );
+    } else {
+      // Limpiar datos asociados en memoria
+      const equiposDelTorneo = store.equipos.filter(e => e.fk_torneo_id === id).map(e => e.id);
+      store.equipoJugadores = store.equipoJugadores.filter(ej => !equiposDelTorneo.includes(ej.fk_equipo_id));
+      store.equipos = store.equipos.filter(e => e.fk_torneo_id !== id);
+
+      const partidosDelTorneo = store.partidos.filter(p => p.fk_torneo_id === id).map(p => p.id);
+      store.sanciones = store.sanciones.map(s =>
+        s.fk_partido_id && partidosDelTorneo.includes(s.fk_partido_id) ? { ...s, fk_partido_id: null } : s
+      );
+      store.partidos = store.partidos.filter(p => p.fk_torneo_id !== id);
+      store.torneos = store.torneos.filter(t => t.id !== id);
+
+      store.auditLogs.push({
+        id: store.auditLogs.length + 1,
+        fk_usuario_id: adminId,
+        accion: 'ELIMINAR_TORNEO',
+        entidad_afectada: 'torneo',
+        entidad_id: id,
+        detalles: JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte }),
+        ip_address: '127.0.0.1',
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    return { id, message: `Torneo "${torneo.nombre}" eliminado exitosamente` };
+  }
 }
 
 export const torneosService = new TorneosService();

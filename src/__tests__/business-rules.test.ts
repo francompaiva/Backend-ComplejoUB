@@ -114,4 +114,25 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     // El primer equipo debe tener mayor o igual puntaje que el segundo
     assert.ok(tabla[0].puntos >= tabla[1].puntos);
   });
+
+  it('RF-07 / Admin: Eliminación de torneo y limpieza de datos vinculados', async () => {
+    // Crear un torneo de prueba
+    const nuevoTorneo = await torneosService.create({
+      nombre: 'Torneo Para Eliminar Test',
+      deporte: 'Padel',
+      costo_inscripcion: 20000,
+      valor_partido: 5000,
+      max_equipos: 4,
+    }, 1);
+
+    const resultado = await torneosService.delete(nuevoTorneo.id, 1);
+    assert.equal(resultado.id, nuevoTorneo.id);
+
+    // Verificar que ya no existe
+    await assert.rejects(
+      async () => await torneosService.getById(nuevoTorneo.id),
+      { message: 'Torneo no encontrado' }
+    );
+  });
 });
+
