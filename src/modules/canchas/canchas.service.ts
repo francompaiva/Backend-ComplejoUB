@@ -159,15 +159,17 @@ export class CanchasService {
       throw new AppError('Nombre, deporte y precio por hora son obligatorios', 400);
     }
 
+    const deporteNorm = (data.deporte as string).replace('ú', 'u').replace('á', 'a') as any;
+
     if (isDbConnected()) {
       const pool = getPool()!;
       const [res]: any = await pool.query(
         'INSERT INTO cancha (nombre, deporte, superficie, techada, iluminacion, precio_hora, activa) VALUES (?, ?, ?, ?, ?, ?, true)',
-        [data.nombre, data.deporte, data.superficie || 'Sintético', !!data.techada, data.iluminacion !== false, data.precio_hora]
+        [data.nombre, deporteNorm, data.superficie || 'Sintetico', !!data.techada, data.iluminacion !== false, data.precio_hora]
       );
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_CANCHA", "cancha", ?, ?)',
-        [adminId, res.insertId, JSON.stringify(data)]
+        [adminId || null, res.insertId, JSON.stringify(data)]
       );
       return this.getById(res.insertId);
     } else {

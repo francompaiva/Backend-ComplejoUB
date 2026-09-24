@@ -62,21 +62,25 @@ export class TorneosService {
       throw new AppError('La cantidad máxima de equipos debe ser al menos 2', 400);
     }
 
-    const minJugadores = data.min_jugadores_equipo || (deporte === 'Futbol 5' ? 5 : deporte === 'Padel' ? 2 : 7);
-    const maxJugadores = data.max_jugadores_equipo || (deporte === 'Futbol 5' ? 12 : deporte === 'Padel' ? 4 : 16);
+    const deporteNorm = deporte.replace('ú', 'u').replace('á', 'a');
+    const minJugadores = data.min_jugadores_equipo || (deporteNorm === 'Futbol 5' ? 5 : deporteNorm === 'Padel' ? 2 : 7);
+    const maxJugadores = data.max_jugadores_equipo || (deporteNorm === 'Futbol 5' ? 12 : deporteNorm === 'Padel' ? 4 : 16);
+    const fechaInicio = data.fecha_inicio || new Date().toISOString().slice(0, 10);
+    const defaultFin = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const fechaFin = data.fecha_fin || defaultFin;
 
     if (isDbConnected()) {
       const pool = getPool()!;
       const [result]: any = await pool.query(
         `INSERT INTO torneo (nombre, deporte, costo_inscripcion, valor_partido, max_equipos, min_jugadores_equipo, max_jugadores_equipo, fecha_inicio, fecha_fin, estado, reglamento)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INSCRIPCION_ABIERTA', ?)`,
-        [nombre, deporte, costo_inscripcion, valor_partido, max_equipos, minJugadores, maxJugadores, data.fecha_inicio || null, data.fecha_fin || null, data.reglamento || null]
+        [nombre, deporteNorm, costo_inscripcion, valor_partido, max_equipos, minJugadores, maxJugadores, fechaInicio, fechaFin, data.reglamento || null]
       );
       const torneoId = result.insertId;
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_TORNEO", "torneo", ?, ?)',
-        [adminId, torneoId, JSON.stringify(data)]
+        [adminId || null, torneoId, JSON.stringify(data)]
       );
 
       return this.getById(torneoId);
