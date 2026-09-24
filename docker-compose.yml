@@ -1,0 +1,55 @@
+services:
+  # Base de Datos MySQL Relacional
+  db:
+    image: mysql:8.0
+    container_name: complejo_ub_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: complejo_deportivo_ub
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/seeds.sql:/docker-entrypoint-initdb.d/02_seeds.sql
+      - ./database/procedures_and_triggers.sql:/docker-entrypoint-initdb.d/03_procedures.sql
+      - mysql_data:/var/lib/mysql
+
+  # Servidor Backend REST API (Node.js + Express + TypeScript)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: complejo_ub_backend
+    restart: always
+    environment:
+      PORT: 4000
+      NODE_ENV: development
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: rootpassword
+      DB_NAME: complejo_deportivo_ub
+      JWT_SECRET: super_secret_jwt_key_complejo_deportivo_ub_2026
+      CORS_ORIGIN: "http://localhost:5173"
+    ports:
+      - "4000:4000"
+    depends_on:
+      - db
+
+  # Frontend SPA (React + TypeScript + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: complejo_ub_frontend
+    restart: always
+    environment:
+      VITE_API_URL: "http://localhost:4000/api/v1"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
