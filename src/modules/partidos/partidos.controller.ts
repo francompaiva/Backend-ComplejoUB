@@ -4,10 +4,14 @@ import { partidosService } from './partidos.service.js';
 export class PartidosController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const torneoId = req.query.torneoId ? parseInt(req.query.torneoId as string, 10) : undefined;
-      const arbitroId = req.query.arbitroId ? parseInt(req.query.arbitroId as string, 10) : undefined;
+      const torneoParam = (req.query.torneoId || req.query['torneo-id']) as string | undefined;
+      const arbitroParam = (req.query.arbitroId || req.query['arbitro-id']) as string | undefined;
+      const numeroFechaParam = (req.query.numeroFecha || req.query['numero-fecha']) as string | undefined;
+
+      const torneoId = torneoParam ? parseInt(torneoParam, 10) : undefined;
+      const arbitroId = arbitroParam ? parseInt(arbitroParam, 10) : undefined;
       const fecha = req.query.fecha as string | undefined;
-      const numeroFecha = req.query.numeroFecha ? parseInt(req.query.numeroFecha as string, 10) : undefined;
+      const numeroFecha = numeroFechaParam ? parseInt(numeroFechaParam, 10) : undefined;
       const partidos = await partidosService.getAll(torneoId, arbitroId, fecha, numeroFecha);
       res.status(200).json({ success: true, data: partidos });
     } catch (error) {

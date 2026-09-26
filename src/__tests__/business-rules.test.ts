@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ReservasService } from '../modules/reservas/reservas.service.js';
 import { TorneosService } from '../modules/torneos/torneos.service.js';
-import { store } from '../config/inMemoryStore.js';
+import { store } from '../config/in-memory-store.js';
 
 describe('Reglas de Negocio - Complejo Deportivo UB', () => {
   const reservasService = new ReservasService();

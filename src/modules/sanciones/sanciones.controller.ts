@@ -4,8 +4,10 @@ import { sancionesService } from './sanciones.service.js';
 export class SancionesController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const usuarioId = req.query.usuarioId ? parseInt(req.query.usuarioId as string, 10) : undefined;
-      const partidoId = req.query.partidoId ? parseInt(req.query.partidoId as string, 10) : undefined;
+      const usuarioParam = (req.query.usuarioId || req.query['usuario-id']) as string | undefined;
+      const partidoParam = (req.query.partidoId || req.query['partido-id']) as string | undefined;
+      const usuarioId = usuarioParam ? parseInt(usuarioParam, 10) : undefined;
+      const partidoId = partidoParam ? parseInt(partidoParam, 10) : undefined;
       const result = await sancionesService.getAll(usuarioId, partidoId);
       res.status(200).json({ success: true, data: result });
     } catch (error) {

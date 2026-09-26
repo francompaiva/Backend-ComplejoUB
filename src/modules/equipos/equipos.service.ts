@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, EquipoModel, EquipoJugadorModel } from '../../config/inMemoryStore.js';
+import { store, EquipoModel, EquipoJugadorModel } from '../../config/in-memory-store.js';
 import { torneosService } from '../torneos/torneos.service.js';
 
 export interface InscribirEquipoDTO {

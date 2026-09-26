@@ -5,7 +5,7 @@ import reservasRoutes from './modules/reservas/reservas.routes.js';
 import torneosRoutes from './modules/torneos/torneos.routes.js';
 import equiposRoutes from './modules/equipos/equipos.routes.js';
 import partidosRoutes from './modules/partidos/partidos.routes.js';
-import listaEsperaRoutes from './modules/lista_espera/lista_espera.routes.js';
+import listaEsperaRoutes from './modules/lista-espera/lista-espera.routes.js';
 import sancionesRoutes from './modules/sanciones/sanciones.routes.js';
 import notificacionesRoutes from './modules/notificaciones/notificaciones.routes.js';
 import reportesRoutes from './modules/reportes/reportes.routes.js';

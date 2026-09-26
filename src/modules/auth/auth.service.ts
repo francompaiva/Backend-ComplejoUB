@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { ENV } from '../../config/env.js';
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, UsuarioModel } from '../../config/inMemoryStore.js';
+import { store, UsuarioModel } from '../../config/in-memory-store.js';
 
 export interface RegisterDTO {
   nombre: string;

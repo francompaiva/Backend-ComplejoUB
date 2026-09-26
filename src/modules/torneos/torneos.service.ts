@@ -1,16 +1,23 @@
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, TorneoModel, PartidoModel } from '../../config/inMemoryStore.js';
+import { store, TorneoModel, PartidoModel } from '../../config/in-memory-store.js';
 
 export interface CreateTorneoDTO {
   nombre: string;
   deporte: 'Futbol 5' | 'Futbol 8' | 'Futbol 11' | 'Tenis' | 'Padel';
-  costo_inscripcion: number;
-  valor_partido: number;
-  max_equipos: number;
+  costoInscripcion?: number;
+  costo_inscripcion?: number;
+  valorPartido?: number;
+  valor_partido?: number;
+  maxEquipos?: number;
+  max_equipos?: number;
+  minJugadoresEquipo?: number;
   min_jugadores_equipo?: number;
+  maxJugadoresEquipo?: number;
   max_jugadores_equipo?: number;
+  fechaInicio?: string;
   fecha_inicio?: string;
+  fechaFin?: string;
   fecha_fin?: string;
   reglamento?: string;
 }
@@ -52,29 +59,32 @@ export class TorneosService {
    * RF-07: Creación de torneos por el Administrador
    */
   async create(data: CreateTorneoDTO, adminId: number) {
-    const { nombre, deporte, costo_inscripcion, valor_partido, max_equipos } = data;
+    const { nombre, deporte } = data;
+    const costoInscripcion = data.costoInscripcion ?? data.costo_inscripcion;
+    const valorPartido = data.valorPartido ?? data.valor_partido;
+    const maxEquipos = data.maxEquipos ?? data.max_equipos;
 
-    if (!nombre || !deporte || costo_inscripcion === undefined || valor_partido === undefined || !max_equipos) {
+    if (!nombre || !deporte || costoInscripcion === undefined || valorPartido === undefined || !maxEquipos) {
       throw new AppError('Todos los campos del torneo son obligatorios', 400);
     }
 
-    if (max_equipos < 2) {
+    if (maxEquipos < 2) {
       throw new AppError('La cantidad máxima de equipos debe ser al menos 2', 400);
     }
 
     const deporteNorm = deporte.replace('ú', 'u').replace('á', 'a');
-    const minJugadores = data.min_jugadores_equipo || (deporteNorm === 'Futbol 5' ? 5 : deporteNorm === 'Padel' ? 2 : 7);
-    const maxJugadores = data.max_jugadores_equipo || (deporteNorm === 'Futbol 5' ? 12 : deporteNorm === 'Padel' ? 4 : 16);
-    const fechaInicio = data.fecha_inicio || new Date().toISOString().slice(0, 10);
+    const minJugadores = data.minJugadoresEquipo ?? data.min_jugadores_equipo ?? (deporteNorm === 'Futbol 5' ? 5 : deporteNorm === 'Padel' ? 2 : 7);
+    const maxJugadores = data.maxJugadoresEquipo ?? data.max_jugadores_equipo ?? (deporteNorm === 'Futbol 5' ? 12 : deporteNorm === 'Padel' ? 4 : 16);
+    const fechaInicio = data.fechaInicio ?? data.fecha_inicio ?? new Date().toISOString().slice(0, 10);
     const defaultFin = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const fechaFin = data.fecha_fin || defaultFin;
+    const fechaFin = data.fechaFin ?? data.fecha_fin ?? defaultFin;
 
     if (isDbConnected()) {
       const pool = getPool()!;
       const [result]: any = await pool.query(
         `INSERT INTO torneo (nombre, deporte, costo_inscripcion, valor_partido, max_equipos, min_jugadores_equipo, max_jugadores_equipo, fecha_inicio, fecha_fin, estado, reglamento)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INSCRIPCION_ABIERTA', ?)`,
-        [nombre, deporteNorm, costo_inscripcion, valor_partido, max_equipos, minJugadores, maxJugadores, fechaInicio, fechaFin, data.reglamento || null]
+        [nombre, deporteNorm, costoInscripcion, valorPartido, maxEquipos, minJugadores, maxJugadores, fechaInicio, fechaFin, data.reglamento || null]
       );
       const torneoId = result.insertId;
 
@@ -90,13 +100,13 @@ export class TorneosService {
         id: newId,
         nombre,
         deporte,
-        costo_inscripcion,
-        valor_partido,
-        max_equipos,
+        costo_inscripcion: costoInscripcion,
+        valor_partido: valorPartido,
+        max_equipos: maxEquipos,
         min_jugadores_equipo: minJugadores,
         max_jugadores_equipo: maxJugadores,
-        fecha_inicio: data.fecha_inicio || null,
-        fecha_fin: data.fecha_fin || null,
+        fecha_inicio: fechaInicio,
+        fecha_fin: fechaFin,
         estado: 'INSCRIPCION_ABIERTA',
         reglamento: data.reglamento,
       };

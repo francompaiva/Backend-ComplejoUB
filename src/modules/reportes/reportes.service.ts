@@ -1,5 +1,5 @@
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store } from '../../config/inMemoryStore.js';
+import { store } from '../../config/in-memory-store.js';
 
 export class ReportesService {
   /**

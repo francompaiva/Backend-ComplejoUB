@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, ReservaModel, SancionModel, NotificacionModel, AuditLogModel } from '../../config/inMemoryStore.js';
+import { store, ReservaModel, SancionModel, NotificacionModel, AuditLogModel } from '../../config/in-memory-store.js';
 import { canchasService } from '../canchas/canchas.service.js';
 
 export interface CreateReservaDTO {

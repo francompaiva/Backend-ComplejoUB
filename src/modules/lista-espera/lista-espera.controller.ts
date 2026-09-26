@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { listaEsperaService } from './lista_espera.service.js';
+import { listaEsperaService } from './lista-espera.service.js';
 
 export class ListaEsperaController {
   async unirse(req: Request, res: Response, next: NextFunction) {

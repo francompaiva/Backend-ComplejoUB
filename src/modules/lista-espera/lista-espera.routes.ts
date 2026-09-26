@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listaEsperaController } from './lista_espera.controller.js';
+import { listaEsperaController } from './lista-espera.controller.js';
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 
 const router = Router();

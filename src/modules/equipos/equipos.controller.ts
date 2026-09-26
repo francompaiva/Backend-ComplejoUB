@@ -4,7 +4,8 @@ import { equiposService } from './equipos.service.js';
 export class EquiposController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const torneoId = req.query.torneoId ? parseInt(req.query.torneoId as string, 10) : undefined;
+      const torneoParam = (req.query.torneoId || req.query['torneo-id']) as string | undefined;
+      const torneoId = torneoParam ? parseInt(torneoParam, 10) : undefined;
       const equipos = await equiposService.getAll(torneoId);
       res.status(200).json({ success: true, data: equipos });
     } catch (error) {

@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, CanchaModel } from '../../config/inMemoryStore.js';
+import { store, CanchaModel } from '../../config/in-memory-store.js';
 
 export interface CreateCanchaDTO {
   nombre: string;
@@ -8,7 +8,8 @@ export interface CreateCanchaDTO {
   superficie?: string;
   techada?: boolean;
   iluminacion?: boolean;
-  precio_hora: number;
+  precioHora?: number;
+  precio_hora?: number; // Compatibilidad con snake_case
 }
 
 export class CanchasService {
@@ -155,7 +156,8 @@ export class CanchasService {
   }
 
   async create(data: CreateCanchaDTO, adminId: number) {
-    if (!data.nombre || !data.deporte || !data.precio_hora) {
+    const precio = data.precioHora ?? data.precio_hora;
+    if (!data.nombre || !data.deporte || precio === undefined) {
       throw new AppError('Nombre, deporte y precio por hora son obligatorios', 400);
     }
 
@@ -165,7 +167,7 @@ export class CanchasService {
       const pool = getPool()!;
       const [res]: any = await pool.query(
         'INSERT INTO cancha (nombre, deporte, superficie, techada, iluminacion, precio_hora, activa) VALUES (?, ?, ?, ?, ?, ?, true)',
-        [data.nombre, deporteNorm, data.superficie || 'Sintetico', !!data.techada, data.iluminacion !== false, data.precio_hora]
+        [data.nombre, deporteNorm, data.superficie || 'Sintetico', !!data.techada, data.iluminacion !== false, precio]
       );
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_CANCHA", "cancha", ?, ?)',
@@ -181,7 +183,7 @@ export class CanchasService {
         superficie: data.superficie || 'Sintético',
         techada: !!data.techada,
         iluminacion: data.iluminacion !== false,
-        precio_hora: data.precio_hora,
+        precio_hora: precio,
         activa: true,
       };
       store.canchas.push(newCancha);

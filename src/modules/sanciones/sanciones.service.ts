@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
-import { store, SancionModel } from '../../config/inMemoryStore.js';
+import { store, SancionModel } from '../../config/in-memory-store.js';
 
 export interface CreateSancionDTO {
   usuarioId: number;
