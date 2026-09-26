@@ -4,7 +4,7 @@
 -- $2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a (hash de 'password123')
 -- =============================================================================
 
-USE complejo_deportivo_ub;
+USE complejo_deportivo;
 
 -- Limpieza previa en orden referencial
 DELETE FROM audit_log;
@@ -22,19 +22,19 @@ DELETE FROM usuario;
 -- -----------------------------------------------------------------------------
 -- 1. USUARIOS (Clientes, Administradores, Árbitros)
 -- -----------------------------------------------------------------------------
-INSERT INTO usuario (id, nombre, email, contrasena_hash, rol, inasistencias, estado_cuenta, suspension_hasta, telefono) VALUES
-(1, 'Administrador General', 'admin@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Administrador', 0, 'Activa', NULL, '+54 11 4567-8901'),
-(2, 'Sebastian Norjean (Árbitro)', 'arbitro@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Arbitro', 0, 'Activa', NULL, '+54 11 5555-1122'),
-(3, 'Marcos Perez del Cerro', 'mperez@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Arbitro', 0, 'Activa', NULL, '+54 11 5555-3344'),
-(4, 'Lucas Díaz (Cliente / Capitán)', 'lucas@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5432'),
-(5, 'Mateo Fernández', 'mateo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 1, 'Activa', NULL, '+54 11 9876-5433'),
-(6, 'Juan Paiva', 'juan@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5434'),
-(7, 'Diego López', 'diego@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5435'),
-(8, 'Gonzalo Higuaín', 'gonzalo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5436'),
-(9, 'Julián Álvarez', 'julian@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5437'),
-(10, 'Enzo Fernández', 'enzo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5438'),
-(11, 'Rodrigo De Paul', 'rodrigo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '+54 11 9876-5439'),
-(12, 'Usuario Sancionado Test', 'sancionado@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 3, 'Suspendida', DATE_ADD(NOW(), INTERVAL 14 DAY), '+54 11 9876-9999');
+INSERT INTO usuario (id, nombre, email, contrasena_hash, rol, inasistencias, estado_cuenta, suspension_hasta, dni, telefono) VALUES
+(1, 'Administrador General', 'admin@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Administrador', 0, 'Activa', NULL, '30111222', '+54 11 4567-8901'),
+(2, 'Sebastian Norjean (Árbitro)', 'arbitro@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Arbitro', 0, 'Activa', NULL, '32333444', '+54 11 5555-1122'),
+(3, 'Marcos Perez del Cerro', 'mperez@complejoub.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Arbitro', 0, 'Activa', NULL, '33444555', '+54 11 5555-3344'),
+(4, 'Lucas Díaz (Cliente / Capitán)', 'lucas@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '40123456', '+54 11 9876-5432'),
+(5, 'Mateo Fernández', 'mateo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 1, 'Activa', NULL, '41229400', '+54 11 9876-5433'),
+(6, 'Juan Paiva', 'juan@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '42110339', '+54 11 9876-5434'),
+(7, 'Diego López', 'diego@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '40887652', '+54 11 9876-5435'),
+(8, 'Gonzalo Higuaín', 'gonzalo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '38109223', '+54 11 9876-5436'),
+(9, 'Julián Álvarez', 'julian@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '41554912', '+54 11 9876-5437'),
+(10, 'Enzo Fernández', 'enzo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '42991442', '+54 11 9876-5438'),
+(11, 'Rodrigo De Paul', 'rodrigo@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 0, 'Activa', NULL, '39001992', '+54 11 9876-5439'),
+(12, 'Usuario Sancionado Test', 'sancionado@gmail.com', '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a', 'Cliente', 3, 'Suspendida', DATE_ADD(NOW(), INTERVAL 14 DAY), '35999888', '+54 11 9876-9999');
 
 -- -----------------------------------------------------------------------------
 -- 2. CANCHAS
@@ -121,8 +121,9 @@ INSERT INTO partido (id, fk_torneo_id, fk_cancha_id, fk_equipo_local_id, fk_equi
 (7, 1, 1, 2, 1, 2, 4, '2026-10-24', '19:00:00', 'PROGRAMADO', NULL, NULL, 'Partido clave por la punta del torneo.'),
 (8, 1, 2, 4, 3, 3, 4, '2026-10-24', '20:00:00', 'PROGRAMADO', NULL, NULL, NULL),
 
--- Partido asignado al árbitro 2 para otra fecha
-(9, 1, 1, 3, 1, 2, 5, '2026-10-31', '19:00:00', 'PROGRAMADO', NULL, NULL, NULL);
+-- Fecha 5 (Jornada 5)
+(9, 1, 1, 3, 1, 2, 5, '2026-10-31', '19:00:00', 'PROGRAMADO', NULL, NULL, NULL),
+(10, 1, 2, 2, 4, 3, 5, '2026-10-31', '20:00:00', 'PROGRAMADO', NULL, NULL, NULL);
 
 -- -----------------------------------------------------------------------------
 -- 9. SANCIONES DISCIPLINARIAS (RF-20)

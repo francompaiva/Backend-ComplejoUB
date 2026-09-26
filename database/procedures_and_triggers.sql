@@ -2,7 +2,7 @@
 -- COMPLEJO DEPORTIVO UB - PROCEDIMIENTOS ALMACENADOS Y REGLAS DE NEGOCIO EN BD
 -- =============================================================================
 
-USE complejo_deportivo_ub;
+USE complejo_deportivo;
 
 DELIMITER $$
 
@@ -238,6 +238,81 @@ BEGIN
       CONCAT('Se ha liberado un turno en la cancha para la fecha ', v_fecha, ' a las ', v_hora, '. Ingresa a la plataforma para confirmar tu reserva.'),
       'ListaEsperaDisponible'
     );
+  END IF;
+END$$
+
+-- -----------------------------------------------------------------------------
+-- 4. TRIGGERS: ACTUALIZACIÓN AUTOMÁTICA DE TABLA DE POSICIONES
+-- -----------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_actualizar_posiciones_after_update$$
+CREATE TRIGGER trg_actualizar_posiciones_after_update
+AFTER UPDATE ON partido
+FOR EACH ROW
+BEGIN
+  IF NEW.estado = 'DISPUTADO' AND (OLD.estado <> 'DISPUTADO' OR OLD.goles_local <> NEW.goles_local OR OLD.goles_visitante <> NEW.goles_visitante) THEN
+    CALL sp_actualizar_tabla_posiciones(NEW.fk_torneo_id);
+  END IF;
+END$$
+
+DROP TRIGGER IF EXISTS trg_actualizar_posiciones_after_insert$$
+CREATE TRIGGER trg_actualizar_posiciones_after_insert
+AFTER INSERT ON partido
+FOR EACH ROW
+BEGIN
+  IF NEW.estado = 'DISPUTADO' THEN
+    CALL sp_actualizar_tabla_posiciones(NEW.fk_torneo_id);
+  END IF;
+END$$
+
+-- -----------------------------------------------------------------------------
+-- 5. TRIGGER: INTEGRIDAD RF-16 - UN JUGADOR POR TORNEO
+-- Evita que un jugador participe o tenga invitación pendiente en > 1 equipo
+-- -----------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_validar_jugador_unico_torneo$$
+CREATE TRIGGER trg_validar_jugador_unico_torneo
+BEFORE INSERT ON equipo_jugador
+FOR EACH ROW
+BEGIN
+  DECLARE v_torneo_id BIGINT;
+  DECLARE v_ya_inscripto INT DEFAULT 0;
+
+  SELECT fk_torneo_id INTO v_torneo_id FROM equipo WHERE id = NEW.fk_equipo_id;
+
+  SELECT COUNT(*) INTO v_ya_inscripto
+  FROM equipo_jugador ej
+  JOIN equipo e ON ej.fk_equipo_id = e.id
+  WHERE ej.fk_usuario_id = NEW.fk_usuario_id 
+    AND e.fk_torneo_id = v_torneo_id
+    AND ej.estado_invitacion IN ('ACEPTADA', 'PENDIENTE');
+
+  IF v_ya_inscripto > 0 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Regla RF-16: El jugador ya pertenece o tiene una invitación pendiente en otro equipo de este mismo torneo.';
+  END IF;
+END$$
+
+-- -----------------------------------------------------------------------------
+-- 6. TRIGGER: INTEGRIDAD - RIVALES DISTINTOS EN PARTIDO
+-- -----------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_validar_rivales_distintos_insert$$
+CREATE TRIGGER trg_validar_rivales_distintos_insert
+BEFORE INSERT ON partido
+FOR EACH ROW
+BEGIN
+  IF NEW.fk_equipo_visitante_id IS NOT NULL AND NEW.fk_equipo_local_id = NEW.fk_equipo_visitante_id THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Un equipo no puede disputar un partido contra sí mismo.';
+  END IF;
+END$$
+
+DROP TRIGGER IF EXISTS trg_validar_rivales_distintos_update$$
+CREATE TRIGGER trg_validar_rivales_distintos_update
+BEFORE UPDATE ON partido
+FOR EACH ROW
+BEGIN
+  IF NEW.fk_equipo_visitante_id IS NOT NULL AND NEW.fk_equipo_local_id = NEW.fk_equipo_visitante_id THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Un equipo no puede disputar un partido contra sí mismo.';
   END IF;
 END$$
 

@@ -3,11 +3,11 @@
 -- MODELO DE DATOS RELACIONAL (DDL MySQL 8.0+)
 -- =============================================================================
 
-CREATE DATABASE IF NOT EXISTS complejo_deportivo_ub
+CREATE DATABASE IF NOT EXISTS complejo_deportivo
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE complejo_deportivo_ub;
+USE complejo_deportivo;
 
 -- Desactivar temporalmente chequeos de claves foráneas para recreación segura
 SET FOREIGN_KEY_CHECKS = 0;
@@ -38,6 +38,7 @@ CREATE TABLE usuario (
   inasistencias INT NOT NULL DEFAULT 0,
   estado_cuenta VARCHAR(20) NOT NULL DEFAULT 'Activa',
   suspension_hasta DATETIME NULL,
+  dni VARCHAR(20) NULL,
   telefono VARCHAR(30) NULL,
   posicion_preferida VARCHAR(50) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -197,7 +198,7 @@ CREATE INDEX idx_ej_estado ON equipo_jugador(estado_invitacion);
 CREATE TABLE partido (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   fk_torneo_id BIGINT NOT NULL,
-  fk_cancha_id BIGINT NOT NULL,
+  fk_cancha_id BIGINT NULL, -- NULL si es Fecha Libre
   fk_equipo_local_id BIGINT NOT NULL,
   fk_equipo_visitante_id BIGINT NULL, -- NULL representa Fecha Libre (equipo sin rival en fecha impar)
   fk_arbitro_id BIGINT NULL,
@@ -211,10 +212,11 @@ CREATE TABLE partido (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT chk_partido_numero_fecha CHECK (numero_fecha > 0),
   CONSTRAINT chk_partido_estado CHECK (estado IN ('PROGRAMADO', 'DISPUTADO', 'SUSPENDIDO', 'REPROGRAMADO')),
+  CONSTRAINT uq_partido_cancha_fecha_hora UNIQUE (fk_cancha_id, fecha, hora),
   CONSTRAINT fk_partido_torneo FOREIGN KEY (fk_torneo_id) REFERENCES torneo(id) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT fk_partido_cancha FOREIGN KEY (fk_cancha_id) REFERENCES cancha(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_partido_local FOREIGN KEY (fk_equipo_local_id) REFERENCES equipo(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_partido_visitante FOREIGN KEY (fk_equipo_visitante_id) REFERENCES equipo(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_partido_cancha FOREIGN KEY (fk_cancha_id) REFERENCES cancha(id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_partido_local FOREIGN KEY (fk_equipo_local_id) REFERENCES equipo(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_partido_visitante FOREIGN KEY (fk_equipo_visitante_id) REFERENCES equipo(id) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT fk_partido_arbitro FOREIGN KEY (fk_arbitro_id) REFERENCES usuario(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -82,7 +82,7 @@ export interface EquipoJugadorModel {
 export interface PartidoModel {
   id: number;
   fk_torneo_id: number;
-  fk_cancha_id: number;
+  fk_cancha_id: number | null;
   fk_equipo_local_id: number;
   fk_equipo_visitante_id: number | null; // null si Fecha Libre
   fk_arbitro_id: number | null;

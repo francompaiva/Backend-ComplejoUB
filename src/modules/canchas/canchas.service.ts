@@ -65,7 +65,7 @@ export class CanchasService {
       if (isDbConnected()) {
         const pool = getPool()!;
         const [partidosTorneo]: any = await pool.query(
-          'SELECT p.id, t.nombre as torneo_nombre FROM partido p JOIN torneo t ON p.fk_torneo_id = t.id WHERE p.fecha = ? AND (t.estado = "EN_CURSO" OR t.estado = "INSCRIPCION_ABIERTA")',
+          'SELECT p.id, t.nombre as torneo_nombre FROM partido p JOIN torneo t ON p.fk_torneo_id = t.id WHERE p.fecha = ? AND (t.estado = "EN_CURSO" OR t.estado = "INSCRIPCION_ABIERTA") AND p.fk_equipo_visitante_id IS NOT NULL',
           [fechaStr]
         );
         if (partidosTorneo && partidosTorneo.length > 0) {
@@ -73,7 +73,7 @@ export class CanchasService {
           motivoBloqueo = `Reservas comunes deshabilitadas por Torneo: ${partidosTorneo[0].torneo_nombre} (RF-06)`;
         }
       } else {
-        const partidosTorneo = store.partidos.filter(p => p.fecha === fechaStr);
+        const partidosTorneo = store.partidos.filter(p => p.fecha === fechaStr && p.fk_equipo_visitante_id !== null);
         if (partidosTorneo.length > 0) {
           torneoBloqueaFinDeSemana = true;
           motivoBloqueo = 'Reservas comunes deshabilitadas por Torneo programado el fin de semana (RF-06)';
@@ -101,13 +101,13 @@ export class CanchasService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        'SELECT hora, id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND estado != "SUSPENDIDO"',
+        'SELECT hora, id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND estado != "SUSPENDIDO" AND fk_equipo_visitante_id IS NOT NULL',
         [canchaId, fechaStr]
       );
       partidosEnCancha = rows;
     } else {
       partidosEnCancha = store.partidos
-        .filter(p => p.fk_cancha_id === canchaId && p.fecha === fechaStr && p.estado !== 'SUSPENDIDO')
+        .filter(p => p.fk_cancha_id === canchaId && p.fecha === fechaStr && p.estado !== 'SUSPENDIDO' && p.fk_equipo_visitante_id !== null)
         .map(p => ({ hora: p.hora, id: p.id }));
     }
 

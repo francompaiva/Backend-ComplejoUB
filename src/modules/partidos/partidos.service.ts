@@ -19,16 +19,16 @@ export interface ReprogramarPartidoDTO {
 }
 
 export class PartidosService {
-  async getAll(torneoId?: number, arbitroId?: number, fecha?: string) {
+  async getAll(torneoId?: number, arbitroId?: number, fecha?: string, numeroFecha?: number) {
     if (isDbConnected()) {
       const pool = getPool()!;
       let query = `
-        SELECT p.*, t.nombre as torneo_nombre, c.nombre as cancha_nombre,
+        SELECT p.*, t.nombre as torneo_nombre, COALESCE(c.nombre, 'Fecha Libre') as cancha_nombre,
                el.nombre as equipo_local, ev.nombre as equipo_visitante,
                u.nombre as arbitro_nombre
         FROM partido p
         JOIN torneo t ON p.fk_torneo_id = t.id
-        JOIN cancha c ON p.fk_cancha_id = c.id
+        LEFT JOIN cancha c ON p.fk_cancha_id = c.id
         JOIN equipo el ON p.fk_equipo_local_id = el.id
         LEFT JOIN equipo ev ON p.fk_equipo_visitante_id = ev.id
         LEFT JOIN usuario u ON p.fk_arbitro_id = u.id
@@ -47,7 +47,11 @@ export class PartidosService {
         query += ' AND p.fecha = ?';
         params.push(fecha);
       }
-      query += ' ORDER BY p.fecha ASC, p.hora ASC';
+      if (numeroFecha) {
+        query += ' AND p.numero_fecha = ?';
+        params.push(numeroFecha);
+      }
+      query += ' ORDER BY p.numero_fecha ASC, p.fecha ASC, p.hora ASC';
       const [rows] = await pool.query(query, params);
       return rows;
     } else {
@@ -55,6 +59,7 @@ export class PartidosService {
       if (torneoId) list = list.filter(p => p.fk_torneo_id === torneoId);
       if (arbitroId) list = list.filter(p => p.fk_arbitro_id === arbitroId);
       if (fecha) list = list.filter(p => p.fecha === fecha);
+      if (numeroFecha) list = list.filter(p => p.numero_fecha === numeroFecha);
 
       return list.map(p => {
         const t = store.torneos.find(tor => tor.id === p.fk_torneo_id);
@@ -79,12 +84,12 @@ export class PartidosService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        `SELECT p.*, t.nombre as torneo_nombre, c.nombre as cancha_nombre,
+        `SELECT p.*, t.nombre as torneo_nombre, COALESCE(c.nombre, 'Fecha Libre') as cancha_nombre,
                el.nombre as equipo_local, ev.nombre as equipo_visitante,
                u.nombre as arbitro_nombre
         FROM partido p
         JOIN torneo t ON p.fk_torneo_id = t.id
-        JOIN cancha c ON p.fk_cancha_id = c.id
+        LEFT JOIN cancha c ON p.fk_cancha_id = c.id
         JOIN equipo el ON p.fk_equipo_local_id = el.id
         LEFT JOIN equipo ev ON p.fk_equipo_visitante_id = ev.id
         LEFT JOIN usuario u ON p.fk_arbitro_id = u.id
@@ -244,6 +249,47 @@ export class PartidosService {
       const p = store.partidos.find(part => part.id === partidoId);
       if (!p) throw new AppError('Partido no encontrado', 404);
       p.estado = nuevoEstado;
+      return this.getById(partidoId);
+    }
+  }
+
+  async reprogramarPartido(partidoId: number, adminId: number, data: ReprogramarPartidoDTO) {
+    const { canchaId, fecha, hora } = data;
+    if (!fecha || !hora) {
+      throw new AppError('Fecha y hora son obligatorias para reprogramar', 400);
+    }
+    const partido = await this.getById(partidoId);
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      if (canchaId) {
+        const [conflict]: any = await pool.query(
+          'SELECT id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND id <> ? AND estado <> "SUSPENDIDO"',
+          [canchaId, fecha, hora, partidoId]
+        );
+        if (conflict && conflict.length > 0) {
+          throw new AppError('La cancha seleccionada ya se encuentra ocupada por otro encuentro en ese horario', 409);
+        }
+      }
+
+      await pool.query(
+        'UPDATE partido SET fk_cancha_id = ?, fecha = ?, hora = ?, estado = "REPROGRAMADO" WHERE id = ?',
+        [canchaId || partido.fk_cancha_id, fecha, hora, partidoId]
+      );
+
+      await pool.query(
+        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "REPROGRAMAR_PARTIDO", "partido", ?, ?)',
+        [adminId, partidoId, JSON.stringify({ fecha, hora, canchaId })]
+      );
+
+      return this.getById(partidoId);
+    } else {
+      const p = store.partidos.find(part => part.id === partidoId);
+      if (!p) throw new AppError('Partido no encontrado', 404);
+      p.fecha = fecha;
+      p.hora = hora;
+      if (canchaId) p.fk_cancha_id = canchaId;
+      p.estado = 'REPROGRAMADO';
       return this.getById(partidoId);
     }
   }

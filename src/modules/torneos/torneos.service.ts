@@ -164,7 +164,7 @@ export class TorneosService {
 
     const fixtureGenerated: Array<{
       torneoId: number;
-      canchaId: number;
+      canchaId: number | null;
       localId: number;
       visitanteId: number | null;
       numeroFecha: number;
@@ -173,12 +173,22 @@ export class TorneosService {
       estado: 'PROGRAMADO';
     }> = [];
 
-    const baseDate = fechaInicioStr ? new Date(fechaInicioStr) : new Date();
+    const baseDate = fechaInicioStr ? new Date(fechaInicioStr + 'T00:00:00') : new Date();
+    // Ajustar la fecha base al próximo sábado para cumplir regla RF-06 de torneos de fin de semana
+    const day = baseDate.getDay();
+    if (day !== 0 && day !== 6) {
+      const daysUntilSaturday = (6 - day + 7) % 7;
+      baseDate.setDate(baseDate.getDate() + daysUntilSaturday);
+    }
+
+    const canchasCount = Math.max(1, canchas.length);
 
     for (let round = 0; round < totalFechas; round++) {
       const roundDate = new Date(baseDate);
-      roundDate.setDate(roundDate.getDate() + round * 7); // Un sábado/semana por fecha
+      roundDate.setDate(roundDate.getDate() + round * 7); // Un sábado por fecha
       const fechaStr = roundDate.toISOString().split('T')[0];
+
+      let playableMatchIndex = 0;
 
       for (let match = 0; match < partidosPorFecha; match++) {
         const homeIdx = (round + match) % (n - 1);
@@ -192,33 +202,36 @@ export class TorneosService {
 
         // Determinar local y visitante (o fecha libre)
         if (teamA.id === -1) {
-          // teamB tiene fecha libre
+          // teamB tiene fecha libre -> no ocupa cancha ni bloquea turno
           fixtureGenerated.push({
             torneoId,
-            canchaId: fallbackCanchaId,
+            canchaId: null,
             localId: teamB.id,
             visitanteId: null, // Fecha Libre
             numeroFecha: round + 1,
             fecha: fechaStr,
-            hora: '19:00:00',
+            hora: '18:00:00',
             estado: 'PROGRAMADO',
           });
         } else if (teamB.id === -1) {
-          // teamA tiene fecha libre
+          // teamA tiene fecha libre -> no ocupa cancha ni bloquea turno
           fixtureGenerated.push({
             torneoId,
-            canchaId: fallbackCanchaId,
+            canchaId: null,
             localId: teamA.id,
             visitanteId: null, // Fecha Libre
             numeroFecha: round + 1,
             fecha: fechaStr,
-            hora: '19:00:00',
+            hora: '18:00:00',
             estado: 'PROGRAMADO',
           });
         } else {
-          // Cruce normal
-          const canchaAsignada = canchas.length > 0 ? canchas[match % canchas.length].id : fallbackCanchaId;
-          const horaAsignada = `${(18 + match).toString().padStart(2, '0')}:00:00`;
+          // Cruce normal: asignación simultánea en paralelo según canchas disponibles
+          const canchaIdx = playableMatchIndex % canchasCount;
+          const slotIdx = Math.floor(playableMatchIndex / canchasCount);
+          const canchaAsignada = canchas.length > 0 ? canchas[canchaIdx].id : fallbackCanchaId;
+          const horaAsignada = `${(18 + slotIdx).toString().padStart(2, '0')}:00:00`;
+          playableMatchIndex++;
 
           fixtureGenerated.push({
             torneoId,
@@ -333,9 +346,9 @@ export class TorneosService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        `SELECT p.*, c.nombre as cancha_nombre, el.nombre as equipo_local, ev.nombre as equipo_visitante, u.nombre as arbitro_nombre
+        `SELECT p.*, COALESCE(c.nombre, 'Fecha Libre') as cancha_nombre, el.nombre as equipo_local, ev.nombre as equipo_visitante, u.nombre as arbitro_nombre
          FROM partido p
-         JOIN cancha c ON p.fk_cancha_id = c.id
+         LEFT JOIN cancha c ON p.fk_cancha_id = c.id
          JOIN equipo el ON p.fk_equipo_local_id = el.id
          LEFT JOIN equipo ev ON p.fk_equipo_visitante_id = ev.id
          LEFT JOIN usuario u ON p.fk_arbitro_id = u.id

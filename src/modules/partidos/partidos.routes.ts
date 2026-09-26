@@ -32,4 +32,9 @@ router.put('/:id/estado', requireRole('Administrador'), (req, res, next) =>
   partidosController.cambiarEstado(req, res, next)
 );
 
+// Reprogramar partido (Administrador)
+router.put('/:id/reprogramar', requireRole('Administrador'), (req, res, next) =>
+  partidosController.reprogramar(req, res, next)
+);
+
 export default router;
