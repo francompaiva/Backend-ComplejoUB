@@ -215,16 +215,3 @@ Todas las cuentas de prueba tienen asignada la contraseña: **`password123`**
 ### 📊 Reportes y Auditoría (`/reportes`)
 * `GET  /reportes/dashboard` — Resumen ejecutivo de ingresos por señas/turnos, tasa de inasistencias y ocupación de canchas *(Solo Administrador)*.
 * `GET  /reportes/auditoria` — Trazabilidad de operaciones críticas en el sistema.
-
----
-
-## 🛡️ Claves Técnicas para la Defensa del Trabajo Práctico
-
-1. **¿Cómo se evitan solapamientos de turnos en las canchas?**  
-   Tanto a nivel base de datos con la restricción `CONSTRAINT uq_partido_cancha_fecha_hora UNIQUE (fk_cancha_id, fecha, hora)` como a nivel de aplicación en los servicios de reservas y torneos, el sistema comprueba la disponibilidad horaria antes de confirmar cualquier turno.
-2. **¿Cómo se resuelve el fixture con cantidad impar de equipos?**  
-   El método `generarFixture` de [src/modules/torneos/torneos.service.ts](file:///c:/Users/seba/Backend-ComplejoUB/src/modules/torneos/torneos.service.ts) implementa el algoritmo Round-Robin clásico con un equipo ficticio ("dummy/bye"). En cada jornada, el equipo emparejado con dicho elemento obtiene **Fecha Libre**, generándose el registro con `canchaId: null` y `visitanteId: null` para no bloquear canchas físicas indebidamente.
-3. **¿Cómo se mantiene actualizada la tabla de posiciones?**  
-   En MySQL, los triggers `trg_actualizar_posiciones_after_insert` y `trg_actualizar_posiciones_after_update` ejecutan el procedimiento almacenado `sp_actualizar_tabla_posiciones`. En el servicio en memoria, la función recalcula dinámicamente partidos jugados, ganados, empatados, perdidos, goles y puntos ante cada modificación de acta.
-4. **¿Cómo se aplica la regla de jugador único por torneo?**  
-   Al asociar un jugador a un equipo, se consulta si su `id_usuario` ya figura en la nómina de cualquier otro equipo inscripto en el mismo `id_torneo`. Si ya pertenece a otro equipo, se rechaza la operación arrojando un error `400 Bad Request` (o error `45000` vía trigger en MySQL).
