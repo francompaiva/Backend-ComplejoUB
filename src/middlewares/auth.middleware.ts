@@ -9,7 +9,7 @@ export interface AuthUser {
   id: number;
   nombre: string;
   email: string;
-  rol: 'Cliente' | 'Administrador' | 'Arbitro';
+  rol: 'Cliente' | 'Administrador' | 'Arbitro' | 'Superadministrador';
   estado_cuenta: string;
   suspension_hasta: string | null;
 }

@@ -9,13 +9,17 @@ import listaEsperaRoutes from './modules/lista-espera/lista-espera.routes.js';
 import sancionesRoutes from './modules/sanciones/sanciones.routes.js';
 import notificacionesRoutes from './modules/notificaciones/notificaciones.routes.js';
 import reportesRoutes from './modules/reportes/reportes.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
 
 const router = Router();
+
+import { isDbConnected } from './config/database.js';
 
 // Health check endpoint
 router.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
+    database: isDbConnected() ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString(),
     service: 'Complejo Deportivo UB - Backend REST API',
     version: '1.0.0',
@@ -33,5 +37,6 @@ router.use('/lista-espera', listaEsperaRoutes);
 router.use('/sanciones', sancionesRoutes);
 router.use('/notificaciones', notificacionesRoutes);
 router.use('/reportes', reportesRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;

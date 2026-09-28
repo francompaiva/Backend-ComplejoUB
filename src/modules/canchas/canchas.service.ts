@@ -58,29 +58,9 @@ export class CanchasService {
     const dayOfWeek = dateObj.getDay(); // 0 = Domingo, 6 = Sábado
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-    // Verificar si hay torneos programados durante el fin de semana en esa fecha/cancha
-    let torneoBloqueaFinDeSemana = false;
-    let motivoBloqueo = '';
-
-    if (isWeekend) {
-      if (isDbConnected()) {
-        const pool = getPool()!;
-        const [partidosTorneo]: any = await pool.query(
-          'SELECT p.id, t.nombre as torneo_nombre FROM partido p JOIN torneo t ON p.fk_torneo_id = t.id WHERE p.fecha = ? AND (t.estado = "EN_CURSO" OR t.estado = "INSCRIPCION_ABIERTA") AND p.fk_equipo_visitante_id IS NOT NULL',
-          [fechaStr]
-        );
-        if (partidosTorneo && partidosTorneo.length > 0) {
-          torneoBloqueaFinDeSemana = true;
-          motivoBloqueo = `Reservas comunes deshabilitadas por Torneo: ${partidosTorneo[0].torneo_nombre} (RF-06)`;
-        }
-      } else {
-        const partidosTorneo = store.partidos.filter(p => p.fecha === fechaStr && p.fk_equipo_visitante_id !== null);
-        if (partidosTorneo.length > 0) {
-          torneoBloqueaFinDeSemana = true;
-          motivoBloqueo = 'Reservas comunes deshabilitadas por Torneo programado el fin de semana (RF-06)';
-        }
-      }
-    }
+    // RF-06: Verificación de partidos de torneo en cancha y horario específicos.
+    // Si un partido oficial de torneo está programado en una cancha y hora, ese turno queda reservado para la liga;
+    // las demás canchas u otros horarios permanecen disponibles para reservas comunes.
 
     // Obtener reservas existentes para la fecha y cancha
     let reservasExistentes: Array<{ hora: string; estado: string }> = [];
@@ -124,15 +104,12 @@ export class CanchasService {
       let estado: 'Libre' | 'Ocupado' | 'DeshabilitadoTorneo' | 'Mantenimiento' = 'Libre';
       let motivo = '';
 
-      if (torneoBloqueaFinDeSemana) {
+      if (tienePartido) {
         estado = 'DeshabilitadoTorneo';
-        motivo = motivoBloqueo;
+        motivo = 'Turno asignado a partido oficial de torneo (RF-06)';
       } else if (estaReservado) {
         estado = 'Ocupado';
         motivo = 'Turno reservado por otro usuario';
-      } else if (tienePartido) {
-        estado = 'Ocupado';
-        motivo = 'Partido oficial de torneo';
       }
 
       slots.push({
@@ -145,12 +122,15 @@ export class CanchasService {
       });
     }
 
+    const tienePartidosEnFecha = partidosEnCancha.length > 0;
+
     return {
       cancha,
       fecha: fechaStr,
       esFinDeSemana: isWeekend,
-      bloqueadoPorTorneo: torneoBloqueaFinDeSemana,
-      motivoBloqueo,
+      bloqueadoPorTorneo: false, // Ahora el bloqueo es por franja horaria individual (RF-06), no de día completo
+      tienePartidosTorneo: tienePartidosEnFecha,
+      motivoBloqueo: tienePartidosEnFecha ? 'La cancha cuenta con partidos de torneo en horarios específicos' : '',
       slots,
     };
   }
@@ -208,12 +188,23 @@ export class CanchasService {
       const pool = getPool()!;
       const fields: string[] = [];
       const values: any[] = [];
-      for (const [k, v] of Object.entries(data)) {
-        if (v !== undefined) {
-          fields.push(`${k} = ?`);
-          values.push(v);
-        }
+
+      const colMap: Record<string, any> = {};
+      if (data.nombre !== undefined) colMap.nombre = data.nombre;
+      if (data.deporte !== undefined) colMap.deporte = (data.deporte as string).replace('ú', 'u').replace('á', 'a');
+      if (data.superficie !== undefined) colMap.superficie = data.superficie;
+      if (data.techada !== undefined) colMap.techada = !!data.techada;
+      if (data.iluminacion !== undefined) colMap.iluminacion = !!data.iluminacion;
+      if ((data as any).hasLighting !== undefined) colMap.iluminacion = !!(data as any).hasLighting;
+      if (data.precio_hora !== undefined) colMap.precio_hora = data.precio_hora;
+      if (data.precioHora !== undefined) colMap.precio_hora = data.precioHora;
+      if (data.activa !== undefined) colMap.activa = !!data.activa;
+
+      for (const [col, val] of Object.entries(colMap)) {
+        fields.push(`${col} = ?`);
+        values.push(val);
       }
+
       if (fields.length > 0) {
         values.push(id);
         await pool.query(`UPDATE cancha SET ${fields.join(', ')} WHERE id = ?`, values);

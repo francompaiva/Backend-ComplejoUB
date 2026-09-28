@@ -3,11 +3,14 @@ export interface UsuarioModel {
   nombre: string;
   email: string;
   contrasena_hash: string;
-  rol: 'Cliente' | 'Administrador' | 'Arbitro';
+  rol: 'Cliente' | 'Administrador' | 'Arbitro' | 'Superadministrador';
   inasistencias: number;
   estado_cuenta: 'Activa' | 'Suspendida' | 'Inactiva';
   suspension_hasta: string | null;
   telefono?: string;
+  email_verificado?: boolean;
+  codigo_verificacion?: string | null;
+  codigo_expiracion?: string | null;
   created_at: string;
 }
 
@@ -141,8 +144,9 @@ export class InMemoryStore {
       id: 1,
       nombre: 'Administrador General',
       email: 'admin@complejoub.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
-      rol: 'Administrador',
+      contrasena_hash: '$2b$10$LimAWBgyxlc7DKT.OW832uPjE.JiSwAWWHO8GCI/G9acFbr4.Y0dS',
+      rol: 'Superadministrador',
+      email_verificado: true,
       inasistencias: 0,
       estado_cuenta: 'Activa',
       suspension_hasta: null,
@@ -153,7 +157,7 @@ export class InMemoryStore {
       id: 2,
       nombre: 'Sebastian Norjean (Árbitro)',
       email: 'arbitro@complejoub.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Arbitro',
       inasistencias: 0,
       estado_cuenta: 'Activa',
@@ -165,7 +169,7 @@ export class InMemoryStore {
       id: 3,
       nombre: 'Marcos Perez del Cerro',
       email: 'mperez@complejoub.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Arbitro',
       inasistencias: 0,
       estado_cuenta: 'Activa',
@@ -177,7 +181,7 @@ export class InMemoryStore {
       id: 4,
       nombre: 'Lucas Díaz (Cliente / Capitán)',
       email: 'lucas@gmail.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Cliente',
       inasistencias: 0,
       estado_cuenta: 'Activa',
@@ -189,7 +193,7 @@ export class InMemoryStore {
       id: 5,
       nombre: 'Mateo Fernández',
       email: 'mateo@gmail.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Cliente',
       inasistencias: 1,
       estado_cuenta: 'Activa',
@@ -201,7 +205,7 @@ export class InMemoryStore {
       id: 6,
       nombre: 'Juan Paiva',
       email: 'juan@gmail.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Cliente',
       inasistencias: 0,
       estado_cuenta: 'Activa',
@@ -213,12 +217,38 @@ export class InMemoryStore {
       id: 7,
       nombre: 'Diego López',
       email: 'diego@gmail.com',
-      contrasena_hash: '$2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
       rol: 'Cliente',
       inasistencias: 0,
       estado_cuenta: 'Activa',
       suspension_hasta: null,
       telefono: '+54 11 9876-5435',
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 13,
+      nombre: 'Administrador de Sede',
+      email: 'operador@complejoub.com',
+      contrasena_hash: '$2b$10$FlKlJrf7FCgzlmp.EItH6egnX5tKj3njd7bbmfbjXUXptJlhtc6Qq',
+      rol: 'Administrador',
+      inasistencias: 0,
+      estado_cuenta: 'Activa',
+      suspension_hasta: null,
+      telefono: '+54 11 4444-5555',
+      email_verificado: true,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 15,
+      nombre: 'Superadministrador General',
+      email: 'complejoub.soporte@gmail.com',
+      contrasena_hash: '$2b$10$LimAWBgyxlc7DKT.OW832uPjE.JiSwAWWHO8GCI/G9acFbr4.Y0dS',
+      rol: 'Superadministrador',
+      inasistencias: 0,
+      estado_cuenta: 'Activa',
+      suspension_hasta: null,
+      telefono: '+54 11 4567-8902',
+      email_verificado: true,
       created_at: new Date().toISOString(),
     },
   ];

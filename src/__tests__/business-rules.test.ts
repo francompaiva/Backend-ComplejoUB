@@ -134,5 +134,25 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       { message: 'Torneo no encontrado' }
     );
   });
+
+  it('Corrección Docente: Inasistencias consecutivas se resetean al confirmar asistencia', async () => {
+    // 1. Simular acumulación de faltas para usuario #4
+    const store = (reservasService as any).store || (await import('../config/in-memory-store.js')).store;
+    const user = store.usuarios.find((u: any) => u.id === 4);
+    assert.ok(user);
+    user.inasistencias = 2;
+
+    // 2. Crear una reserva y confirmar asistencia
+    const reserva = await reservasService.createReserva(4, {
+      canchaId: 1,
+      fecha: '2026-11-20',
+      hora: '21:00:00',
+    });
+
+    const resultado = await reservasService.confirmarAsistencia(reserva.id, 1);
+    assert.equal(resultado.asistenciaConfirmada, true);
+    assert.equal(resultado.inasistencias, 0);
+    assert.equal(user.inasistencias, 0);
+  });
 });
 

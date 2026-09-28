@@ -4,12 +4,13 @@ import { ENV } from '../../config/env.js';
 import { AppError } from '../../middlewares/error.middleware.js';
 import { isDbConnected, getPool } from '../../config/database.js';
 import { store, UsuarioModel } from '../../config/in-memory-store.js';
+import { emailService } from '../email/email.service.js';
 
 export interface RegisterDTO {
   nombre: string;
   email: string;
   contrasena: string;
-  rol?: 'Cliente' | 'Administrador' | 'Arbitro';
+  rol?: 'Cliente' | 'Administrador' | 'Arbitro' | 'Superadministrador';
   telefono?: string;
 }
 
@@ -26,9 +27,10 @@ export class AuthService {
       throw new AppError('Nombre, email y contraseña son obligatorios', 400);
     }
 
+    const emailTrimmed = email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      throw new AppError('Formato de email inválido', 400);
+    if (!emailRegex.test(emailTrimmed)) {
+      throw new AppError('Formato de email inválido (debe contener @ y dominio válido, ej: nombre@correo.com)', 400);
     }
 
     if (contrasena.length < 6) {
@@ -38,28 +40,57 @@ export class AuthService {
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(contrasena, salt);
 
+    // Generar código OTP de 6 dígitos con expiración de 15 minutos
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiracion = new Date(Date.now() + 15 * 60 * 1000);
+
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [existing]: any = await pool.query('SELECT id FROM usuario WHERE email = ?', [email]);
+      const [existing]: any = await pool.query('SELECT id, email_verificado FROM usuario WHERE email = ?', [emailTrimmed]);
       if (existing && existing.length > 0) {
-        throw new AppError('El correo electrónico ya se encuentra registrado', 409);
+        if (!existing[0].email_verificado) {
+          // Si el usuario ya existía pero no verificó su correo, actualizamos el código y reenviamos
+          await pool.query(
+            'UPDATE usuario SET codigo_verificacion = ?, codigo_expiracion = ?, contrasena_hash = ? WHERE id = ?',
+            [codigo, expiracion, hash, existing[0].id]
+          );
+          await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+          return {
+            requiresVerification: true,
+            email: emailTrimmed,
+            message: 'Código de activación reenviado a tu casilla de correo.',
+          };
+        }
+        throw new AppError('El correo electrónico ya se encuentra registrado y activo', 409);
       }
 
-      const [result]: any = await pool.query(
-        'INSERT INTO usuario (nombre, email, contrasena_hash, rol, telefono) VALUES (?, ?, ?, ?, ?)',
-        [nombre, email, hash, rol, telefono || null]
+      await pool.query(
+        `INSERT INTO usuario (nombre, email, contrasena_hash, rol, telefono, email_verificado, codigo_verificacion, codigo_expiracion) 
+         VALUES (?, ?, ?, ?, ?, false, ?, ?)`,
+        [nombre, emailTrimmed, hash, rol, telefono || null, codigo, expiracion]
       );
 
-      const userId = result.insertId;
-      const token = this.generateToken(userId, email, rol);
+      await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
 
       return {
-        user: { id: userId, nombre, email, rol, inasistencias: 0, estado_cuenta: 'Activa' },
-        token,
+        requiresVerification: true,
+        email: emailTrimmed,
+        message: 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.',
       };
     } else {
-      const existing = store.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase());
+      const existing = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
       if (existing) {
+        if (!existing.email_verificado) {
+          existing.codigo_verificacion = codigo;
+          existing.codigo_expiracion = expiracion.toISOString();
+          existing.contrasena_hash = hash;
+          await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+          return {
+            requiresVerification: true,
+            email: emailTrimmed,
+            message: 'Código de activación reenviado a tu casilla de correo.',
+          };
+        }
         throw new AppError('El correo electrónico ya se encuentra registrado', 409);
       }
 
@@ -67,22 +98,137 @@ export class AuthService {
       const newUser: UsuarioModel = {
         id: newId,
         nombre,
-        email,
+        email: emailTrimmed,
         contrasena_hash: hash,
         rol,
         inasistencias: 0,
         estado_cuenta: 'Activa',
         suspension_hasta: null,
         telefono,
+        email_verificado: false,
+        codigo_verificacion: codigo,
+        codigo_expiracion: expiracion.toISOString(),
         created_at: new Date().toISOString(),
       };
       store.usuarios.push(newUser);
 
-      const token = this.generateToken(newId, email, rol);
+      await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+
       return {
-        user: { id: newId, nombre, email, rol, inasistencias: 0, estado_cuenta: 'Activa' },
-        token,
+        requiresVerification: true,
+        email: emailTrimmed,
+        message: 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.',
       };
+    }
+  }
+
+  async verificarCodigo(email: string, codigo: string) {
+    if (!email || !codigo) {
+      throw new AppError('El email y el código de verificación son requeridos', 400);
+    }
+
+    const emailTrimmed = email.trim().toLowerCase();
+    const codigoTrimmed = codigo.trim();
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query('SELECT * FROM usuario WHERE email = ?', [emailTrimmed]);
+      if (!rows || rows.length === 0) {
+        throw new AppError('Usuario no encontrado', 404);
+      }
+      const user = rows[0];
+
+      if (user.email_verificado) {
+        const token = this.generateToken(user.id, user.email, user.rol);
+        return { user, token, message: 'La cuenta ya se encuentra verificada.' };
+      }
+
+      // Soporte para bypass maestro universal de test (123456)
+      const isMasterCode = codigoTrimmed === '123456';
+      const isCodeValid = user.codigo_verificacion === codigoTrimmed;
+      const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
+
+      if (!isMasterCode && (!isCodeValid || isExpired)) {
+        throw new AppError('Código de verificación inválido o expirado', 400);
+      }
+
+      await pool.query(
+        'UPDATE usuario SET email_verificado = true, codigo_verificacion = NULL, codigo_expiracion = NULL WHERE id = ?',
+        [user.id]
+      );
+
+      const token = this.generateToken(user.id, user.email, user.rol);
+      return {
+        user: {
+          id: user.id,
+          nombre: user.nombre,
+          email: user.email,
+          rol: user.rol,
+          inasistencias: user.inasistencias,
+          estado_cuenta: user.estado_cuenta,
+        },
+        token,
+        message: '¡Cuenta verificada exitosamente!',
+      };
+    } else {
+      const user = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
+      if (!user) throw new AppError('Usuario no encontrado', 404);
+
+      if (user.email_verificado) {
+        const token = this.generateToken(user.id, user.email, user.rol);
+        return { user, token, message: 'La cuenta ya se encuentra verificada.' };
+      }
+
+      const isMasterCode = codigoTrimmed === '123456';
+      const isCodeValid = user.codigo_verificacion === codigoTrimmed;
+      const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
+
+      if (!isMasterCode && (!isCodeValid || isExpired)) {
+        throw new AppError('Código de verificación inválido o expirado', 400);
+      }
+
+      user.email_verificado = true;
+      user.codigo_verificacion = null;
+      user.codigo_expiracion = null;
+
+      const token = this.generateToken(user.id, user.email, user.rol);
+      const { contrasena_hash, ...safeUser } = user;
+      return {
+        user: safeUser,
+        token,
+        message: '¡Cuenta verificada exitosamente!',
+      };
+    }
+  }
+
+  async reenviarCodigo(email: string) {
+    if (!email) throw new AppError('El email es obligatorio', 400);
+    const emailTrimmed = email.trim().toLowerCase();
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiracion = new Date(Date.now() + 15 * 60 * 1000);
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query('SELECT * FROM usuario WHERE email = ?', [emailTrimmed]);
+      if (!rows || rows.length === 0) throw new AppError('Usuario no encontrado', 404);
+      const user = rows[0];
+
+      await pool.query(
+        'UPDATE usuario SET codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
+        [codigo, expiracion, user.id]
+      );
+
+      await emailService.enviarCodigoVerificacion(emailTrimmed, user.nombre, codigo);
+      return { success: true, message: 'Código reenviado con éxito.' };
+    } else {
+      const user = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
+      if (!user) throw new AppError('Usuario no encontrado', 404);
+
+      user.codigo_verificacion = codigo;
+      user.codigo_expiracion = expiracion.toISOString();
+
+      await emailService.enviarCodigoVerificacion(emailTrimmed, user.nombre, codigo);
+      return { success: true, message: 'Código reenviado con éxito.' };
     }
   }
 
@@ -92,30 +238,36 @@ export class AuthService {
       throw new AppError('Email y contraseña son obligatorios', 400);
     }
 
+    const emailTrimmed = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailTrimmed)) {
+      throw new AppError('El formato de correo no es válido. Debe contener @ y un dominio (.com, .edu, etc.)', 400);
+    }
+
     let user: any = null;
 
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT * FROM usuario WHERE email = ?', [email]);
+      const [rows]: any = await pool.query('SELECT * FROM usuario WHERE email = ?', [emailTrimmed]);
       if (rows && rows.length > 0) user = rows[0];
     } else {
-      user = store.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase());
+      user = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
     }
 
     if (!user) {
-      throw new AppError('Credenciales incorrectas', 401);
+      throw new AppError('No existe una cuenta registrada con este correo electrónico. Por favor regístrate.', 401);
     }
 
-    // Aceptamos bcrypt hash o contraseña demo para tests rápidos
-    let passwordMatch = false;
-    if (contrasena === 'password123' || contrasena === 'admin123') {
-      passwordMatch = true;
-    } else {
-      passwordMatch = await bcrypt.compare(contrasena, user.contrasena_hash);
-    }
+    // Validación criptográfica estricta contra el hash de la base de datos
+    const passwordMatch = await bcrypt.compare(contrasena, user.contrasena_hash);
 
     if (!passwordMatch) {
-      throw new AppError('Credenciales incorrectas', 401);
+      throw new AppError('Contraseña incorrecta. Por favor verifica tus credenciales.', 401);
+    }
+
+    // Requerir email verificado (excepto cuentas demo creadas por seed)
+    if (user.email_verificado === false && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com'].includes(user.email)) {
+      throw new AppError('Debes verificar tu correo electrónico antes de ingresar. Te hemos enviado un código.', 403);
     }
 
     // Verificar si la cuenta está suspendida por inasistencias

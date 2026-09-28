@@ -368,6 +368,58 @@ export class ReservasService {
     }
   }
 
+  async confirmarAsistencia(reservaId: number, adminId: number) {
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query('SELECT * FROM reserva WHERE id = ?', [reservaId]);
+      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
+      const reserva = rows[0];
+
+      await pool.query('UPDATE reserva SET estado = "FINALIZADA", asistencia_confirmada = true WHERE id = ?', [reservaId]);
+      await pool.query('UPDATE usuario SET inasistencias = 0 WHERE id = ?', [reserva.fk_usuario_id]);
+
+      await pool.query(
+        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CONFIRMAR_ASISTENCIA", "reserva", ?, ?)',
+        [adminId, reservaId, JSON.stringify({ usuarioId: reserva.fk_usuario_id, inasistenciasReset: 0 })]
+      );
+
+      return {
+        reservaId,
+        estado: 'FINALIZADA',
+        asistenciaConfirmada: true,
+        inasistencias: 0,
+      };
+    } else {
+      const reserva = store.reservas.find(r => r.id === reservaId);
+      if (!reserva) throw new AppError('Reserva no encontrada', 404);
+      reserva.estado = 'FINALIZADA';
+      reserva.asistencia_confirmada = true;
+
+      const user = store.usuarios.find(u => u.id === reserva.fk_usuario_id);
+      if (user) {
+        user.inasistencias = 0;
+      }
+
+      store.auditLogs.push({
+        id: store.auditLogs.length + 1,
+        fk_usuario_id: adminId,
+        accion: 'CONFIRMAR_ASISTENCIA',
+        entidad_afectada: 'reserva',
+        entidad_id: reservaId,
+        detalles: JSON.stringify({ usuarioId: reserva.fk_usuario_id, inasistenciasReset: 0 }),
+        ip_address: '127.0.0.1',
+        created_at: new Date().toISOString(),
+      });
+
+      return {
+        reservaId,
+        estado: 'FINALIZADA',
+        asistenciaConfirmada: true,
+        inasistencias: 0,
+      };
+    }
+  }
+
   async getMisReservas(userId: number) {
     if (isDbConnected()) {
       const pool = getPool()!;

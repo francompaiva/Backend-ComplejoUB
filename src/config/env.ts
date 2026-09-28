@@ -16,4 +16,12 @@ export const ENV = {
     EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   },
   CORS_ORIGIN: process.env.CORS_ORIGIN || '*',
+  SMTP: {
+    HOST: process.env.SMTP_HOST || '',
+    PORT: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587,
+    USER: process.env.SMTP_USER || '',
+    PASSWORD: process.env.SMTP_PASSWORD || process.env.SMTP_PASS || '',
+    FROM_EMAIL: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'no-reply@complejoub.com',
+    FROM_NAME: process.env.SMTP_FROM_NAME || 'Complejo Deportivo UB',
+  },
 };
