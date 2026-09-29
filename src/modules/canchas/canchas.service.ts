@@ -113,7 +113,7 @@ export class CanchasService {
         motivo = 'Horario concluido';
       } else if (tienePartido) {
         estado = 'DeshabilitadoTorneo';
-        motivo = 'Turno asignado a partido oficial de torneo (RF-06)';
+        motivo = 'Turno asignado a partido oficial de torneo';
       } else if (estaReservado) {
         estado = 'Ocupado';
         motivo = 'Turno reservado por otro usuario';

@@ -43,7 +43,7 @@ export class ReservasService {
         if (u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
           if (new Date(u.suspension_hasta) > new Date()) {
             throw new AppError(
-              `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias (RF-05)`,
+              `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
               403
             );
           }
@@ -54,7 +54,7 @@ export class ReservasService {
       if (u && u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
         if (new Date(u.suspension_hasta) > new Date()) {
           throw new AppError(
-            `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias (RF-05)`,
+            `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
             403
           );
         }
@@ -357,7 +357,7 @@ export class ReservasService {
             fk_usuario_id: user.id,
             fk_partido_id: null,
             tipo_sancion: 'Suspensión 2 semanas',
-            descripcion: 'Suspensión automática por acumular 3 inasistencias consecutivas (RF-05).',
+            descripcion: 'Suspensión automática por acumular 3 inasistencias consecutivas.',
             fecha_sancion: new Date().toISOString(),
             fk_creado_por_id: adminId,
           });

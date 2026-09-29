@@ -306,7 +306,7 @@ export class EquiposService {
       );
       if (rows && rows.length > 0) {
         throw new AppError(
-          `Regla RF-16: El jugador ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por torneo.`,
+          `El jugador ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por torneo.`,
           409
         );
       }
@@ -319,7 +319,7 @@ export class EquiposService {
       if (part) {
         const eq = store.equipos.find(e => e.id === part.fk_equipo_id);
         throw new AppError(
-          `Regla RF-16: El jugador ya se encuentra inscripto en el equipo '${eq?.nombre}' dentro de este torneo.`,
+          `El jugador ya se encuentra inscripto en el equipo '${eq?.nombre}' dentro de este torneo.`,
           409
         );
       }
