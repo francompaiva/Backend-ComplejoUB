@@ -49,16 +49,16 @@ export class AuthService {
       const [existing]: any = await pool.query('SELECT id, email_verificado FROM usuario WHERE email = ?', [emailTrimmed]);
       if (existing && existing.length > 0) {
         if (!existing[0].email_verificado) {
-          // Si el usuario ya existía pero no verificó su correo, actualizamos el código y reenviamos
+          // Si el usuario ya existía pero no verificó su correo, actualizamos contraseña, datos y código OTP
           await pool.query(
-            'UPDATE usuario SET codigo_verificacion = ?, codigo_expiracion = ?, contrasena_hash = ? WHERE id = ?',
-            [codigo, expiracion, hash, existing[0].id]
+            'UPDATE usuario SET nombre = ?, contrasena_hash = ?, telefono = ?, codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
+            [nombre, hash, telefono || null, codigo, expiracion, existing[0].id]
           );
           await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
-            message: 'Código de activación reenviado a tu casilla de correo.',
+            message: 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.',
           };
         }
         throw new AppError('El correo electrónico ya se encuentra registrado y activo', 409);
@@ -81,14 +81,16 @@ export class AuthService {
       const existing = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
       if (existing) {
         if (!existing.email_verificado) {
+          existing.nombre = nombre;
+          existing.contrasena_hash = hash;
+          if (telefono) existing.telefono = telefono;
           existing.codigo_verificacion = codigo;
           existing.codigo_expiracion = expiracion.toISOString();
-          existing.contrasena_hash = hash;
           await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
-            message: 'Código de activación reenviado a tu casilla de correo.',
+            message: 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.',
           };
         }
         throw new AppError('El correo electrónico ya se encuentra registrado', 409);
@@ -262,12 +264,34 @@ export class AuthService {
     const passwordMatch = await bcrypt.compare(contrasena, user.contrasena_hash);
 
     if (!passwordMatch) {
+      if (!user.email_verificado) {
+        throw new AppError(
+          'Contraseña incorrecta. Si aún no confirmaste tu cuenta o deseas definir una nueva contraseña, puedes volver a registrarte con este correo o verificar el código.',
+          401
+        );
+      }
       throw new AppError('Contraseña incorrecta. Por favor verifica tus credenciales.', 401);
     }
 
     // Requerir email verificado (excepto cuentas demo creadas por seed)
     if (user.email_verificado === false && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com'].includes(user.email)) {
-      throw new AppError('Debes verificar tu correo electrónico antes de ingresar. Te hemos enviado un código.', 403);
+      // Generar nuevo código OTP y reenviar por correo automáticamente
+      const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiracion = new Date(Date.now() + 15 * 60 * 1000);
+
+      if (isDbConnected()) {
+        await getPool()!.query(
+          'UPDATE usuario SET codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
+          [codigo, expiracion, user.id]
+        );
+      } else {
+        user.codigo_verificacion = codigo;
+        user.codigo_expiracion = expiracion.toISOString();
+      }
+
+      await emailService.enviarCodigoVerificacion(user.email, user.nombre, codigo);
+
+      throw new AppError('Debes verificar tu correo electrónico antes de ingresar. Te hemos enviado un nuevo código de activación a tu casilla de correo.', 403);
     }
 
     // Verificar si la cuenta está suspendida por inasistencias

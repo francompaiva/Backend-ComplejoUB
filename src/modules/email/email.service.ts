@@ -12,21 +12,33 @@ export class EmailService {
   }
 
   private async initTransporter() {
-    if (ENV.SMTP && ENV.SMTP.HOST && ENV.SMTP.USER && ENV.SMTP.PASSWORD) {
-      const isGmail = ENV.SMTP.HOST.toLowerCase().includes('gmail');
-      this.transporter = nodemailer.createTransport({
-        host: ENV.SMTP.HOST,
-        port: ENV.SMTP.PORT,
-        secure: ENV.SMTP.PORT === 465,
-        auth: {
-          user: ENV.SMTP.USER,
-          pass: ENV.SMTP.PASSWORD,
-        },
-        ...(isGmail && ENV.SMTP.PORT === 587 ? { requireTLS: true } : {}),
-      });
+    if (ENV.SMTP && ENV.SMTP.USER && ENV.SMTP.PASSWORD) {
+      const isGmail = (ENV.SMTP.HOST && ENV.SMTP.HOST.toLowerCase().includes('gmail')) ||
+                      (ENV.SMTP.USER && ENV.SMTP.USER.toLowerCase().includes('gmail'));
+      if (isGmail) {
+        this.transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: ENV.SMTP.USER,
+            pass: ENV.SMTP.PASSWORD,
+          },
+        });
+        console.log(`[EmailService] Configurado transportador Gmail Service oficial con usuario ${ENV.SMTP.USER}`);
+      } else {
+        this.transporter = nodemailer.createTransport({
+          host: ENV.SMTP.HOST,
+          port: ENV.SMTP.PORT,
+          secure: ENV.SMTP.PORT === 465,
+          auth: {
+            user: ENV.SMTP.USER,
+            pass: ENV.SMTP.PASSWORD,
+          },
+          ...(ENV.SMTP.PORT === 587 ? { requireTLS: true } : {}),
+        });
+        console.log(`[EmailService] Configurado transportador SMTP (${ENV.SMTP.HOST}:${ENV.SMTP.PORT}) con usuario ${ENV.SMTP.USER}`);
+      }
       this.isConfigured = true;
       this.isEthereal = false;
-      console.log(`[EmailService] Configurado transportador SMTP real (${ENV.SMTP.HOST}:${ENV.SMTP.PORT}) con usuario ${ENV.SMTP.USER}`);
     } else {
       // Modo Desarrollo / Fallback: Ethereal o simulación por consola
       try {
@@ -86,8 +98,9 @@ export class EmailService {
     }
 
     try {
+      const sender = `${ENV.SMTP.FROM_NAME || 'Complejo Deportivo UB'} <${ENV.SMTP.USER || ENV.SMTP.FROM_EMAIL}>`;
       const info = await this.transporter.sendMail({
-        from: `"${ENV.SMTP.FROM_NAME}" <${ENV.SMTP.FROM_EMAIL}>`,
+        from: sender,
         to: email,
         subject: `Tu código de verificación UB: ${codigo}`,
         html: htmlContent,
@@ -99,12 +112,12 @@ export class EmailService {
           console.log(`🔗 [Previsualización Ethereal Mail]: ${previewUrl}`);
         }
       } else {
-        console.log(`✅ [EmailService] Correo enviado exitosamente vía SMTP (${ENV.SMTP.HOST}) a ${email}`);
+        console.log(`✅ [EmailService] Correo enviado exitosamente vía SMTP a ${email} (${info.response || 'OK'})`);
       }
       return true;
     } catch (err: any) {
-      console.warn(`[EmailService] Error al enviar email: ${err.message}`);
-      return true; // No frenamos el flujo, el código ya fue logueado en consola
+      console.error(`[EmailService] ❌ Error al enviar email a ${email}: ${err.message}`);
+      return false;
     }
   }
 }
