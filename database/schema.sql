@@ -91,13 +91,14 @@ CREATE TABLE reserva (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_reserva_estado CHECK (estado IN ('CONFIRMADA', 'CANCELADA', 'INASISTENCIA', 'FINALIZADA')),
   CONSTRAINT fk_reserva_usuario FOREIGN KEY (fk_usuario_id) REFERENCES usuario(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_reserva_cancha FOREIGN KEY (fk_cancha_id) REFERENCES cancha(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT uq_cancha_fecha_hora UNIQUE (fk_cancha_id, fecha, hora)
+  CONSTRAINT fk_reserva_cancha FOREIGN KEY (fk_cancha_id) REFERENCES cancha(id) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX idx_reserva_usuario ON reserva(fk_usuario_id);
+CREATE INDEX idx_reserva_cancha ON reserva(fk_cancha_id);
 CREATE INDEX idx_reserva_fecha ON reserva(fecha);
 CREATE INDEX idx_reserva_estado ON reserva(estado);
+CREATE INDEX idx_reserva_cancha_fecha_hora ON reserva(fk_cancha_id, fecha, hora, estado);
 
 -- =============================================================================
 -- 4. TABLA: lista_espera (Alcance 3.1, RF-24)

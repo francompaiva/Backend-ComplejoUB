@@ -85,6 +85,16 @@ export class ReservasService {
 
     if (isDbConnected()) {
       const pool = getPool()!;
+
+      // Doble verificación defensiva en MySQL: Solo bloquear si existe una reserva CONFIRMADA (permite re-reservar turnos cancelados)
+      const [existingActive]: any = await pool.query(
+        'SELECT id FROM reserva WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = "CONFIRMADA"',
+        [canchaId, fecha, hora]
+      );
+      if (existingActive && existingActive.length > 0) {
+        throw new AppError('El turno seleccionado ya se encuentra reservado por otro usuario.', 409);
+      }
+
       const [result]: any = await pool.query(
         `INSERT INTO reserva (fk_usuario_id, fk_cancha_id, fecha, hora, monto_total, monto_sena, sena_abonada, estado)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')`,

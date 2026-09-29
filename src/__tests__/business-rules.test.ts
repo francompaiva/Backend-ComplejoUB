@@ -202,5 +202,23 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       }
     );
   });
+
+  it('RF-04c: Re-reserva exitosa de un turno previamente cancelado (liberación de turno)', async () => {
+    const fecha = '2026-11-25';
+    const hora = '16:00:00';
+
+    // 1. Primera reserva
+    const r1 = await reservasService.createReserva(4, { canchaId: 1, fecha, hora });
+    assert.equal(r1.estado, 'CONFIRMADA');
+
+    // 2. Se cancela el turno
+    const cancelado = await reservasService.cancelarReserva(r1.id, 4, 'Cliente', 'Liberar turno');
+    assert.equal(cancelado.estado, 'CANCELADA');
+
+    // 3. Otro usuario (o el mismo) re-reserva ese mismo turno liberado
+    const r2 = await reservasService.createReserva(5, { canchaId: 1, fecha, hora });
+    assert.equal(r2.estado, 'CONFIRMADA');
+    assert.notEqual(r1.id, r2.id);
+  });
 });
 
