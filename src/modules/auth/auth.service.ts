@@ -257,24 +257,18 @@ export class AuthService {
     }
 
     if (!user) {
-      throw new AppError('No existe una cuenta registrada con este correo electrónico. Por favor regístrate.', 401);
+      throw new AppError('No existe una cuenta registrada con este correo electrónico. Por favor revisa el email o regístrate.', 401, { code: 'USER_NOT_FOUND' });
     }
 
     // Validación criptográfica estricta contra el hash de la base de datos
     const passwordMatch = await bcrypt.compare(contrasena, user.contrasena_hash);
 
     if (!passwordMatch) {
-      if (!user.email_verificado) {
-        throw new AppError(
-          'Contraseña incorrecta. Si aún no confirmaste tu cuenta o deseas definir una nueva contraseña, puedes volver a registrarte con este correo o verificar el código.',
-          401
-        );
-      }
-      throw new AppError('Contraseña incorrecta. Por favor verifica tus credenciales.', 401);
+      throw new AppError('Contraseña incorrecta. Por favor revisa la contraseña ingresada.', 401, { code: 'INVALID_PASSWORD' });
     }
 
     // Requerir email verificado (excepto cuentas demo creadas por seed)
-    if (!user.email_verificado && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com'].includes(user.email)) {
+    if (!user.email_verificado && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com', 'complejoub.soporte@gmail.com'].includes(user.email)) {
       // Generar nuevo código OTP y reenviar por correo automáticamente
       const codigo = Math.floor(100000 + Math.random() * 900000).toString();
       const expiracion = new Date(Date.now() + 15 * 60 * 1000);
@@ -291,7 +285,11 @@ export class AuthService {
 
       await emailService.enviarCodigoVerificacion(user.email, user.nombre, codigo);
 
-      throw new AppError('Debes verificar tu correo electrónico antes de ingresar. Te hemos enviado un nuevo código de activación a tu casilla de correo.', 403);
+      throw new AppError(
+        'Debes activar tu cuenta antes de ingresar. Te hemos enviado un nuevo código de activación a tu casilla de correo.',
+        403,
+        { requiresVerification: true, email: user.email }
+      );
     }
 
     // Verificar si la cuenta está suspendida por inasistencias
