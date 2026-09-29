@@ -104,7 +104,14 @@ export class CanchasService {
       let estado: 'Libre' | 'Ocupado' | 'DeshabilitadoTorneo' | 'Mantenimiento' = 'Libre';
       let motivo = '';
 
-      if (tienePartido) {
+      const [y, m, d] = fechaStr.split('-').map(Number);
+      const slotDateTime = new Date(y, m - 1, d, h, 0, 0);
+      const yaPaso = slotDateTime.getTime() <= Date.now();
+
+      if (yaPaso) {
+        estado = 'Ocupado';
+        motivo = 'Horario concluido';
+      } else if (tienePartido) {
         estado = 'DeshabilitadoTorneo';
         motivo = 'Turno asignado a partido oficial de torneo (RF-06)';
       } else if (estaReservado) {

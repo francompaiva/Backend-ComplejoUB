@@ -20,6 +20,17 @@ export class ReservasService {
     let hora = data.hora;
     if (hora.length === 5) hora = `${hora}:00`;
 
+    // Validar que la fecha y hora seleccionada no pertenezca al pasado
+    const cleanDateStr = fecha.includes('T') ? fecha.split('T')[0] : fecha;
+    const cleanTimeStr = hora.length === 5 ? `${hora}:00` : hora;
+    const [year, month, day] = cleanDateStr.split('-').map(Number);
+    const [hours, minutes] = cleanTimeStr.split(':').map(Number);
+    const turnoDate = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+
+    if (turnoDate.getTime() <= Date.now()) {
+      throw new AppError('No es posible reservar un turno para una fecha u horario que ya ha transcurrido', 400);
+    }
+
     // 1. Verificar si el usuario está suspendido
     if (isDbConnected()) {
       const pool = getPool()!;
@@ -166,8 +177,14 @@ export class ReservasService {
       throw new AppError('La reserva ya se encuentra cancelada', 400);
     }
 
-    // Calcular anticipación en horas
-    const reservaDateTime = new Date(`${reserva.fecha}T${reserva.hora}`);
+    // Calcular anticipación en horas con parsing robusto de fecha/hora MySQL y en-memoria
+    const dateStr = reserva.fecha instanceof Date
+      ? reserva.fecha.toISOString().split('T')[0]
+      : String(reserva.fecha).split('T')[0];
+    const horaStr = reserva.hora.length === 5 ? `${reserva.hora}:00` : reserva.hora;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [hh, mm, ss] = horaStr.split(':').map(Number);
+    const reservaDateTime = new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0);
     const now = new Date();
     const diffHours = (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 

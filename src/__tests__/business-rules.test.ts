@@ -154,5 +154,53 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     assert.equal(resultado.inasistencias, 0);
     assert.equal(user.inasistencias, 0);
   });
+
+  it('RF-04b: Cancelación con menos de 24 horas NO reintegra la seña (0% devolución)', async () => {
+    // Crear reserva con menos de 24 horas (ej. para hoy dentro de 2 horas o simular turno inminente)
+    const inminente = new Date();
+    inminente.setHours(inminente.getHours() + 5);
+    const fechaStr = inminente.toISOString().split('T')[0];
+    const horaStr = `${inminente.getHours().toString().padStart(2, '0')}:00:00`;
+
+    const reserva = await reservasService.createReserva(4, {
+      canchaId: 2,
+      fecha: fechaStr,
+      hora: horaStr,
+    });
+
+    const resultado = await reservasService.cancelarReserva(reserva.id, 4, 'Cliente', 'Imprevisto de última hora');
+    assert.equal(resultado.estado, 'CANCELADA');
+    assert.equal(resultado.aplicaDevolucion, false);
+    assert.equal(resultado.montoSenaDevuelto, 0);
+  });
+
+  it('Validación Docente: Rechazar reserva de fechas u horarios concluidos en el pasado', async () => {
+    await assert.rejects(
+      async () => {
+        await reservasService.createReserva(4, {
+          canchaId: 1,
+          fecha: '2020-01-01',
+          hora: '10:00:00',
+        });
+      },
+      { message: 'No es posible reservar un turno para una fecha u horario que ya ha transcurrido' }
+    );
+  });
+
+  it('RF-05b: Usuario con cuenta suspendida es bloqueado al intentar reservar', async () => {
+    // Usuario 12 está suspendido
+    await assert.rejects(
+      async () => {
+        await reservasService.createReserva(12, {
+          canchaId: 1,
+          fecha: '2026-12-01',
+          hora: '18:00:00',
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 403 && err.message.includes('Usuario suspendido');
+      }
+    );
+  });
 });
 
