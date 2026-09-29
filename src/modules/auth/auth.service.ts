@@ -274,7 +274,7 @@ export class AuthService {
     }
 
     // Requerir email verificado (excepto cuentas demo creadas por seed)
-    if (user.email_verificado === false && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com'].includes(user.email)) {
+    if (!user.email_verificado && !['admin@complejoub.com', 'lucas@gmail.com', 'arbitro@complejoub.com'].includes(user.email)) {
       // Generar nuevo código OTP y reenviar por correo automáticamente
       const codigo = Math.floor(100000 + Math.random() * 900000).toString();
       const expiracion = new Date(Date.now() + 15 * 60 * 1000);
