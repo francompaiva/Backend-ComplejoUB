@@ -5,9 +5,9 @@ import { requireRole } from '../../middlewares/role.middleware.js';
 
 const router = Router();
 
-// Exclusivo para Superadministrador titular
+// Exclusivo para roles con privilegios de Administrador
 router.use(authMiddleware);
-router.use(requireRole('Superadministrador'));
+router.use(requireRole('Superadministrador', 'Administrador'));
 
 router.get('/administradores', (req, res, next) => adminController.getAdministradores(req, res, next));
 router.post('/promover', (req, res, next) => adminController.promoverUsuario(req, res, next));

@@ -9,8 +9,14 @@ async function main() {
     process.exit(1);
   }
 
+  const initialPassword = process.env.INITIAL_SUPERADMIN_PASSWORD;
+  if (!initialPassword || initialPassword.trim() === '') {
+    console.error('[Error] Debes definir la variable INITIAL_SUPERADMIN_PASSWORD en tu entorno o archivo .env para ejecutar este script.');
+    process.exit(1);
+  }
+
   const salt = await bcrypt.genSalt(10);
-  const hash = await bcrypt.hash('admin123', salt);
+  const hash = await bcrypt.hash(initialPassword, salt);
 
   const email = 'complejoub.soporte@gmail.com';
   const nombre = 'Superadministrador General (Soporte UB)';

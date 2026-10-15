@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
 import { ENV } from './config/env.js';
 import { initDatabase } from './config/database.js';
 import { errorHandler } from './middlewares/error.middleware.js';
+import { swaggerDocument } from './config/swagger.js';
 import apiRoutes from './routes.js';
 
 const app = express();
@@ -38,6 +40,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Documentación interactiva Swagger / OpenAPI
+app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+app.get('/api/v1/docs.json', (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerDocument);
+});
+
 // Rutas de API
 app.use('/api/v1', apiRoutes);
 
@@ -64,6 +73,7 @@ async function startServer() {
     console.log(`  COMPLEJO DEPORTIVO UB - BACKEND API`);
     console.log(`  Servidor activo en: http://localhost:${ENV.PORT}`);
     console.log(`  Health Check: http://localhost:${ENV.PORT}/api/v1/health`);
+    console.log(`  Swagger Docs: http://localhost:${ENV.PORT}/api/v1/docs`);
     console.log(`  Modo: ${ENV.NODE_ENV}`);
     console.log(`====================================================`);
   });

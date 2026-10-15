@@ -2,11 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ReservasService } from '../modules/reservas/reservas.service.js';
 import { TorneosService } from '../modules/torneos/torneos.service.js';
+import { AuthService } from '../modules/auth/auth.service.js';
 import { store } from '../config/in-memory-store.js';
 
 describe('Reglas de Negocio - Complejo Deportivo UB', () => {
   const reservasService = new ReservasService();
   const torneosService = new TorneosService();
+  const authService = new AuthService();
 
   it('RF-03: Cálculo exacto de seña del 30% al reservar', async () => {
     // Cancha 1 (Fútbol 5) cuesta $18.000 -> la seña del 30% debe ser $5.400
@@ -156,10 +158,20 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
   });
 
   it('RF-04b: Cancelación con menos de 24 horas NO reintegra la seña (0% devolución)', async () => {
-    // Crear reserva con menos de 24 horas (ej. para hoy dentro de 2 horas o simular turno inminente)
+    // Crear reserva dentro del horario operativo (entre 8 y 22 hs) a menos de 24 horas
     const inminente = new Date();
-    inminente.setHours(inminente.getHours() + 5);
-    const fechaStr = inminente.toISOString().split('T')[0];
+    // Si la hora actual es antes de las 20hs, usamos hoy a las 22hs (a pocas horas).
+    // Si ya es tarde, usamos mañana a las 10hs (menos de 24hs).
+    if (inminente.getHours() < 21) {
+      inminente.setHours(22, 0, 0, 0);
+    } else {
+      inminente.setDate(inminente.getDate() + 1);
+      inminente.setHours(10, 0, 0, 0);
+    }
+    const y = inminente.getFullYear();
+    const m = String(inminente.getMonth() + 1).padStart(2, '0');
+    const d = String(inminente.getDate()).padStart(2, '0');
+    const fechaStr = `${y}-${m}-${d}`;
     const horaStr = `${inminente.getHours().toString().padStart(2, '0')}:00:00`;
 
     const reserva = await reservasService.createReserva(4, {
@@ -219,6 +231,50 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     const r2 = await reservasService.createReserva(5, { canchaId: 1, fecha, hora });
     assert.equal(r2.estado, 'CONFIRMADA');
     assert.notEqual(r1.id, r2.id);
+  });
+
+  it('RBAC Signup: El registro público fuerza el rol "Cliente" e ignora intentos de escalado', async () => {
+    const testEmail = `attacker-${Date.now()}@test.com`;
+    // Intentar registrarse como 'Administrador' o 'Superadministrador'
+    await authService.register({
+      nombre: 'Usuario Malicioso',
+      email: testEmail,
+      contrasena: 'password123',
+      rol: 'Administrador' as any,
+    });
+
+    const createdUser = store.usuarios.find(u => u.email === testEmail);
+    assert.ok(createdUser);
+    assert.equal(createdUser.rol, 'Cliente');
+  });
+
+  it('Inmutabilidad de Fixture: No se puede generar ni regenerar fixture si el torneo está en curso', async () => {
+    // Torneo 1 ya se encuentra generado / EN_CURSO
+    const torneo1 = store.torneos.find(t => t.id === 1)!;
+    assert.ok(torneo1);
+    torneo1.estado = 'EN_CURSO';
+
+    await assert.rejects(
+      async () => await torneosService.generarFixture(1, 1),
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('inmutable');
+      }
+    );
+  });
+
+  it('Contador de Inasistencias: Se reinicia a 0 automáticamente al expirar el período de suspensión', async () => {
+    // Configurar usuario de prueba con suspensión ya vencida en el pasado
+    const testUser = store.usuarios.find(u => u.id === 5)!;
+    testUser.estado_cuenta = 'Suspendida';
+    testUser.inasistencias = 3;
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 1);
+    testUser.suspension_hasta = pastDate.toISOString();
+
+    const profile = await authService.getProfile(5);
+    assert.equal(profile.estado_cuenta, 'Activa');
+    assert.equal(profile.inasistencias, 0);
+    assert.equal(profile.suspension_hasta, null);
   });
 });
 

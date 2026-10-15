@@ -134,6 +134,19 @@ export class TorneosService {
    */
   async generarFixture(torneoId: number, adminId: number, fechaInicioStr?: string) {
     const torneo = await this.getById(torneoId);
+    if (!torneo) {
+      throw new AppError('Torneo no encontrado', 404);
+    }
+
+    // Regla de dominio: Inmutabilidad de Fixture en torneos iniciados o en progreso
+    if (
+      torneo.estado === 'EN_CURSO' ||
+      torneo.estado === 'FINALIZADO' ||
+      (torneo.estado as string) === 'INICIADO' ||
+      (torneo.estado as string) === 'EN_PROGRESO'
+    ) {
+      throw new AppError('No se puede generar o modificar el fixture de un torneo que ya ha sido iniciado o finalizado (fixture inmutable)', 400);
+    }
 
     // Obtener equipos inscriptos
     let equipos: Array<{ id: number; nombre: string }> = [];

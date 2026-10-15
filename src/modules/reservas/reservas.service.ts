@@ -46,6 +46,9 @@ export class ReservasService {
               `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
               403
             );
+          } else {
+            // Cumplió con el período temporal de suspensión: reactivar cuenta y resetear inasistencias
+            await pool.query('UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?', [userId]);
           }
         }
       }
@@ -57,6 +60,11 @@ export class ReservasService {
             `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
             403
           );
+        } else {
+          // Cumplió con el período temporal de suspensión: reactivar cuenta y resetear inasistencias
+          u.estado_cuenta = 'Activa';
+          u.suspension_hasta = null;
+          u.inasistencias = 0;
         }
       }
     }

@@ -21,7 +21,10 @@ export interface LoginDTO {
 
 export class AuthService {
   async register(data: RegisterDTO) {
-    const { nombre, email, contrasena, rol = 'Cliente', telefono } = data;
+    const { nombre, email, contrasena, telefono } = data;
+    // Seguridad y RBAC: En el registro público el rol siempre se restringe estrictamente a 'Cliente'.
+    // La asignación de roles administrativos está restringida al endpoint protegido de administración.
+    const rol = 'Cliente';
 
     if (!nombre || !email || !contrasena) {
       throw new AppError('Nombre, email y contraseña son obligatorios', 400);
@@ -299,12 +302,13 @@ export class AuthService {
       if (suspensionEnd > new Date()) {
         isSuspended = true;
       } else {
-        // La suspensión ya venció, restablecer automáticamente a Activa
+        // La suspensión ya cumplió su periodo lectivo/temporal: reactivar cuenta y restablecer inasistencias a 0
         if (isDbConnected()) {
-          await getPool()!.query('UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL WHERE id = ?', [user.id]);
+          await getPool()!.query('UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?', [user.id]);
         } else {
           user.estado_cuenta = 'Activa';
           user.suspension_hasta = null;
+          user.inasistencias = 0;
         }
       }
     }
@@ -316,9 +320,9 @@ export class AuthService {
         nombre: user.nombre,
         email: user.email,
         rol: user.rol,
-        inasistencias: user.inasistencias,
-        estado_cuenta: isSuspended ? 'Suspendida' : user.estado_cuenta,
-        suspension_hasta: user.suspension_hasta,
+        inasistencias: isSuspended ? user.inasistencias : 0,
+        estado_cuenta: isSuspended ? 'Suspendida' : 'Activa',
+        suspension_hasta: isSuspended ? user.suspension_hasta : null,
       },
       token,
     };
@@ -332,10 +336,22 @@ export class AuthService {
         [userId]
       );
       if (!rows || rows.length === 0) throw new AppError('Usuario no encontrado', 404);
-      return rows[0];
+      const user = rows[0];
+      if (user.estado_cuenta === 'Suspendida' && user.suspension_hasta && new Date(user.suspension_hasta) <= new Date()) {
+        await pool.query('UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?', [userId]);
+        user.estado_cuenta = 'Activa';
+        user.suspension_hasta = null;
+        user.inasistencias = 0;
+      }
+      return user;
     } else {
       const user = store.usuarios.find(u => u.id === userId);
       if (!user) throw new AppError('Usuario no encontrado', 404);
+      if (user.estado_cuenta === 'Suspendida' && user.suspension_hasta && new Date(user.suspension_hasta) <= new Date()) {
+        user.estado_cuenta = 'Activa';
+        user.suspension_hasta = null;
+        user.inasistencias = 0;
+      }
       const { contrasena_hash, ...profile } = user;
       return profile;
     }

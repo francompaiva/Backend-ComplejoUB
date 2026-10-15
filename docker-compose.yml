@@ -5,8 +5,8 @@ services:
     container_name: complejo_ub_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: complejo_deportivo_ub
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-complejo_deportivo}
     ports:
       - "3306:3306"
     volumes:
@@ -23,15 +23,15 @@ services:
     container_name: complejo_ub_backend
     restart: always
     environment:
-      PORT: 4000
-      NODE_ENV: development
+      PORT: ${PORT:-4000}
+      NODE_ENV: ${NODE_ENV:-development}
       DB_HOST: db
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: rootpassword
-      DB_NAME: complejo_deportivo_ub
-      JWT_SECRET: super_secret_jwt_key_complejo_deportivo_ub_2026
-      CORS_ORIGIN: "http://localhost:5173"
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      DB_NAME: ${DB_NAME:-complejo_deportivo}
+      JWT_SECRET: ${JWT_SECRET:-jwt_local_dev_secret_key_complejo_ub_2026}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     ports:
       - "4000:4000"
     depends_on:
