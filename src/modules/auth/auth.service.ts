@@ -148,8 +148,9 @@ export class AuthService {
         return { user, token, message: 'La cuenta ya se encuentra verificada.' };
       }
 
-      // Soporte para bypass maestro universal de test (123456)
-      const isMasterCode = codigoTrimmed === '123456';
+      // Soporte para bypass maestro universal de test/evaluación (configurable vía OTP_MASTER_CODE)
+      const masterCode = ENV.AUTH?.OTP_MASTER_CODE;
+      const isMasterCode = !!masterCode && codigoTrimmed === masterCode;
       const isCodeValid = user.codigo_verificacion === codigoTrimmed;
       const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
 
@@ -184,7 +185,8 @@ export class AuthService {
         return { user, token, message: 'La cuenta ya se encuentra verificada.' };
       }
 
-      const isMasterCode = codigoTrimmed === '123456';
+      const masterCode = ENV.AUTH?.OTP_MASTER_CODE;
+      const isMasterCode = !!masterCode && codigoTrimmed === masterCode;
       const isCodeValid = user.codigo_verificacion === codigoTrimmed;
       const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
 

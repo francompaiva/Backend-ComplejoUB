@@ -5,6 +5,7 @@ export const ENV = {
   PORT: process.env.PORT ? parseInt(process.env.PORT, 10) : 4000,
   NODE_ENV: process.env.NODE_ENV || 'development',
   DB: {
+    URI: process.env.DATABASE_URL || process.env.DB_URI || '',
     HOST: process.env.DB_HOST || 'localhost',
     PORT: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
     USER: process.env.DB_USER || 'root',
@@ -14,6 +15,9 @@ export const ENV = {
   JWT: {
     SECRET: process.env.JWT_SECRET || (process.env.NODE_ENV === 'test' ? 'test_jwt_secret_only_for_unit_tests' : ''),
     EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
+  },
+  AUTH: {
+    OTP_MASTER_CODE: process.env.OTP_MASTER_CODE || (process.env.NODE_ENV === 'production' ? '' : '123456'),
   },
   CORS_ORIGIN: process.env.CORS_ORIGIN || '*',
   SMTP: {
