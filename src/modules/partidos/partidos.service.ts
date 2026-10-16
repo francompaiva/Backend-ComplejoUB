@@ -256,40 +256,101 @@ export class PartidosService {
   async reprogramarPartido(partidoId: number, adminId: number, data: ReprogramarPartidoDTO) {
     const { canchaId, fecha, hora } = data;
     if (!fecha || !hora) {
-      throw new AppError('Fecha y hora son obligatorias para reprogramar', 400);
+      throw new AppError('Fecha y hora son obligatorias para programar o reprogramar el partido', 400);
     }
+
+    // Validación de día: Torneos de fin de semana deben disputarse Sábado o Domingo
+    const [year, month, day] = fecha.split('-').map(Number);
+    const dateObj = new Date(year, month - 1, day);
+    const dayOfWeek = dateObj.getDay(); // 0: Domingo, 6: Sábado
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      throw new AppError('Los partidos de torneos de fin de semana deben programarse un día sábado o domingo', 400);
+    }
+
     const partido = await this.getById(partidoId);
+    const targetCanchaId = canchaId || partido.fk_cancha_id;
+
+    const normalizeSport = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
     if (isDbConnected()) {
       const pool = getPool()!;
-      if (canchaId) {
+
+      // 1. Validar que la cancha pertenezca al deporte del torneo
+      if (targetCanchaId) {
+        const [canchaRows]: any = await pool.query('SELECT id, nombre, deporte FROM cancha WHERE id = ?', [targetCanchaId]);
+        if (!canchaRows || canchaRows.length === 0) {
+          throw new AppError('La cancha especificada no existe', 404);
+        }
+        const cancha = canchaRows[0];
+
+        const [torneoRows]: any = await pool.query('SELECT id, deporte FROM torneo WHERE id = ?', [partido.fk_torneo_id]);
+        if (torneoRows && torneoRows.length > 0) {
+          const torneoDeporte = torneoRows[0].deporte;
+          if (normalizeSport(cancha.deporte) !== normalizeSport(torneoDeporte)) {
+            throw new AppError(
+              `La cancha asignada (${cancha.nombre} - ${cancha.deporte}) no corresponde al deporte del torneo (${torneoDeporte})`,
+              400
+            );
+          }
+        }
+
+        // 2. Validar que no interfiera con otros partidos previamente programados
         const [conflict]: any = await pool.query(
-          'SELECT id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND id <> ? AND estado <> "SUSPENDIDO"',
-          [canchaId, fecha, hora, partidoId]
+          'SELECT id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND id <> ? AND estado NOT IN ("SUSPENDIDO", "CANCELADO")',
+          [targetCanchaId, fecha, hora, partidoId]
         );
         if (conflict && conflict.length > 0) {
-          throw new AppError('La cancha seleccionada ya se encuentra ocupada por otro encuentro en ese horario', 409);
+          throw new AppError('La cancha seleccionada ya se encuentra ocupada por otro encuentro en ese día y horario', 409);
         }
       }
 
       await pool.query(
-        'UPDATE partido SET fk_cancha_id = ?, fecha = ?, hora = ?, estado = "REPROGRAMADO" WHERE id = ?',
-        [canchaId || partido.fk_cancha_id, fecha, hora, partidoId]
+        'UPDATE partido SET fk_cancha_id = ?, fecha = ?, hora = ?, estado = "PROGRAMADO" WHERE id = ?',
+        [targetCanchaId, fecha, hora, partidoId]
       );
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "REPROGRAMAR_PARTIDO", "partido", ?, ?)',
-        [adminId, partidoId, JSON.stringify({ fecha, hora, canchaId })]
+        [adminId, partidoId, JSON.stringify({ fecha, hora, canchaId: targetCanchaId })]
       );
 
       return this.getById(partidoId);
     } else {
       const p = store.partidos.find(part => part.id === partidoId);
       if (!p) throw new AppError('Partido no encontrado', 404);
+
+      if (targetCanchaId) {
+        const cancha = store.canchas.find(ca => ca.id === targetCanchaId);
+        if (!cancha) throw new AppError('La cancha especificada no existe', 404);
+
+        const torneo = store.torneos.find(t => t.id === p.fk_torneo_id);
+        if (torneo && normalizeSport(cancha.deporte) !== normalizeSport(torneo.deporte)) {
+          throw new AppError(
+            `La cancha asignada (${cancha.nombre} - ${cancha.deporte}) no corresponde al deporte del certamen (${torneo.deporte})`,
+            400
+          );
+        }
+
+        // Validar conflicto de horario con otros partidos activos en memoria
+        const horaPrefix = hora.slice(0, 5);
+        const conflict = store.partidos.find(
+          other =>
+            other.id !== partidoId &&
+            other.fk_cancha_id === targetCanchaId &&
+            other.fecha === fecha &&
+            other.hora.slice(0, 5) === horaPrefix &&
+            other.estado !== 'SUSPENDIDO'
+        );
+        if (conflict) {
+          throw new AppError('La cancha seleccionada ya se encuentra ocupada por otro encuentro en ese día y horario', 409);
+        }
+      }
+
       p.fecha = fecha;
-      p.hora = hora;
-      if (canchaId) p.fk_cancha_id = canchaId;
-      p.estado = 'REPROGRAMADO';
+      p.hora = hora.length === 5 ? hora + ':00' : hora;
+      if (targetCanchaId) p.fk_cancha_id = targetCanchaId;
+      p.estado = 'PROGRAMADO';
       return this.getById(partidoId);
     }
   }

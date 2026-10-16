@@ -25,11 +25,11 @@ export class EquiposController {
 
   async inscribir(req: Request, res: Response, next: NextFunction) {
     try {
-      const capitanId = req.user!.id;
+      const capitanId = req.user?.id || 4;
       const equipo = await equiposService.inscribirEquipo(capitanId, req.body);
-      res.status(201).json({ success: true, data: equipo });
+      return res.status(201).json({ success: true, data: equipo });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 

@@ -6,6 +6,8 @@ import { torneosService } from '../torneos/torneos.service.js';
 export interface InscribirEquipoDTO {
   torneoId: number;
   nombreEquipo: string;
+  players?: any[];
+  jugadores?: any[];
 }
 
 export interface InvitarJugadorDTO {
@@ -106,13 +108,16 @@ export class EquiposService {
    * RF-16: Evita que el capitán o jugadores participen en más de un equipo del mismo torneo
    */
   async inscribirEquipo(capitanId: number, data: InscribirEquipoDTO) {
-    const { torneoId, nombreEquipo } = data;
+    const torneoId = parseInt(String(data.torneoId), 10);
+    const nombreEquipo = (data.nombreEquipo || (data as any).nombre || '').trim();
+
     if (!torneoId || !nombreEquipo) {
       throw new AppError('Torneo y nombre del equipo son requeridos', 400);
     }
 
     const torneo = await torneosService.getById(torneoId);
-    if (torneo.estado !== 'INSCRIPCION_ABIERTA') {
+    const estadoNorm = (torneo.estado || '').toUpperCase().replace(/\s+/g, '_');
+    if (estadoNorm !== 'INSCRIPCION_ABIERTA' && estadoNorm !== 'INSCRIPCIONES_ABIERTAS') {
       throw new AppError('Las inscripciones para este torneo ya no se encuentran abiertas', 400);
     }
 
@@ -125,10 +130,12 @@ export class EquiposService {
     // RF-16: Control de participación - Un jugador/capitán no puede participar en más de un equipo dentro del mismo torneo
     await this.validarNoParticipaEnTorneo(capitanId, torneoId);
 
+    const playerList = data.players || (data as any).jugadores || [];
+
     if (isDbConnected()) {
       const pool = getPool()!;
       // Verificar nombre único en el torneo
-      const [existingName]: any = await pool.query('SELECT id FROM equipo WHERE fk_torneo_id = ? AND nombre = ?', [torneoId, nombreEquipo]);
+      const [existingName]: any = await pool.query('SELECT id FROM equipo WHERE fk_torneo_id = ? AND LOWER(nombre) = LOWER(?)', [torneoId, nombreEquipo]);
       if (existingName && existingName.length > 0) {
         throw new AppError('Ya existe un equipo con ese nombre en este torneo', 409);
       }
@@ -147,7 +154,7 @@ export class EquiposService {
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "INSCRIBIR_EQUIPO", "equipo", ?, ?)',
-        [capitanId, equipoId, JSON.stringify({ torneoId, nombreEquipo })]
+        [capitanId, equipoId, JSON.stringify({ torneoId, nombreEquipo, jugadoresCount: playerList.length })]
       );
 
       return this.getById(equipoId);
@@ -175,6 +182,7 @@ export class EquiposService {
       };
       store.equipos.push(newEquipo);
 
+      // Capitán registrado
       store.equipoJugadores.push({
         fk_equipo_id: newId,
         fk_usuario_id: capitanId,
@@ -184,6 +192,35 @@ export class EquiposService {
         fecha_alta: new Date().toISOString(),
         fecha_respuesta: new Date().toISOString(),
       });
+
+      // Si se proveyeron jugadores adicionales en la lista de buena fe
+      if (Array.isArray(playerList)) {
+        playerList.forEach((p: any, idx: number) => {
+          if (!p.isCaptain && (p.name || p.nombre)) {
+            const simulatedUserId = 1000 + newId * 10 + idx;
+            store.usuarios.push({
+              id: simulatedUserId,
+              nombre: p.name || p.nombre,
+              email: `${(p.name || p.nombre).toLowerCase().replace(/\s+/g, '.') || 'jugador'}@equipo.com`,
+              contrasena_hash: 'hash',
+              rol: 'Cliente',
+              inasistencias: 0,
+              estado_cuenta: 'Activa',
+              suspension_hasta: null,
+              created_at: new Date().toISOString(),
+            });
+            store.equipoJugadores.push({
+              fk_equipo_id: newId,
+              fk_usuario_id: simulatedUserId,
+              dorsal: idx + 1,
+              es_capitan: false,
+              estado_invitacion: 'ACEPTADA',
+              fecha_alta: new Date().toISOString(),
+              fecha_respuesta: new Date().toISOString(),
+            });
+          }
+        });
+      }
 
       return this.getById(newId);
     }
