@@ -89,7 +89,11 @@ export class EmailService {
     if (this.isEthereal) {
       console.log(`ℹ️  [Modo Pruebas / Dev] El sistema está usando Ethereal Mail (simulación local).`);
       console.log(`⚠️  Nota: Ethereal NO envía correos a bandejas reales (Gmail, Hotmail, etc.).`);
-      console.log(`💡 Para activar la cuenta: ingresa el código ${codigo} o el bypass maestro 123456.`);
+      if (ENV.AUTH?.OTP_MASTER_CODE) {
+        console.log(`💡 Para activar la cuenta: ingresa el código ${codigo} o el bypass maestro ${ENV.AUTH.OTP_MASTER_CODE}.`);
+      } else {
+        console.log(`💡 Para activar la cuenta: ingresa el código ${codigo}.`);
+      }
     }
     console.log('======================================================\n');
 

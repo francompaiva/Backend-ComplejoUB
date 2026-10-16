@@ -6,24 +6,39 @@ let isConnected = false;
 
 export async function initDatabase(): Promise<boolean> {
   try {
-    pool = mysql.createPool({
-      host: ENV.DB.HOST,
-      port: ENV.DB.PORT,
-      user: ENV.DB.USER,
-      password: ENV.DB.PASSWORD,
-      database: ENV.DB.NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 0,
-    });
+    if (ENV.DB.URI) {
+      pool = mysql.createPool({
+        uri: ENV.DB.URI,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0,
+      });
+    } else {
+      pool = mysql.createPool({
+        host: ENV.DB.HOST,
+        port: ENV.DB.PORT,
+        user: ENV.DB.USER,
+        password: ENV.DB.PASSWORD,
+        database: ENV.DB.NAME,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0,
+      });
+    }
 
     const connection = await pool.getConnection();
     await connection.ping();
     connection.release();
     isConnected = true;
-    console.log(`[Database] Conectado exitosamente a MySQL (${ENV.DB.HOST}:${ENV.DB.PORT}/${ENV.DB.NAME})`);
+
+    const connectionLabel = ENV.DB.URI
+      ? ENV.DB.URI.replace(/:([^:@]+)@/, ':****@')
+      : `${ENV.DB.HOST}:${ENV.DB.PORT}/${ENV.DB.NAME}`;
+    console.log(`[Database] Conectado exitosamente a MySQL (${connectionLabel})`);
 
     // Verificación y migración idempotente de restricciones de reserva (permite re-reservar turnos cancelados)
     try {

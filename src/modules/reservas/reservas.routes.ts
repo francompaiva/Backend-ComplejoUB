@@ -14,6 +14,9 @@ router.get('/mis-reservas', (req, res, next) => reservasController.getMisReserva
 // Crear reserva (RF-03)
 router.post('/', (req, res, next) => reservasController.create(req, res, next));
 
+// Consultar condiciones y términos de cancelación centralizados en backend
+router.get('/:id/cancelacion-info', (req, res, next) => reservasController.getCancelacionInfo(req, res, next));
+
 // Cancelar reserva con regla >24h (RF-04)
 router.post('/:id/cancelar', (req, res, next) => reservasController.cancelar(req, res, next));
 
