@@ -9,6 +9,31 @@ export interface CreateReservaDTO {
   hora: string;  // HH:00:00 o HH:00
 }
 
+/**
+ * Cálculo centralizado en backend de las condiciones y términos de cancelación de reservas (>24hs).
+ */
+export function computeCancelTerms(reserva: any) {
+  const dateStr = reserva.fecha instanceof Date
+    ? reserva.fecha.toISOString().split('T')[0]
+    : String(reserva.fecha).split('T')[0];
+  const horaStr = reserva.hora ? (reserva.hora.length === 5 ? `${reserva.hora}:00` : String(reserva.hora)) : '00:00:00';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm, ss] = horaStr.split(':').map(Number);
+  const reservaDateTime = new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0);
+  const now = new Date();
+  const diffHours = (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  const aplicaDevolucion = reserva.estado === 'CANCELADA'
+    ? Boolean(reserva.devolucion_sena)
+    : diffHours > 24;
+
+  return {
+    diffHours,
+    horasAnticipacion: Math.round(diffHours),
+    aplicaDevolucion,
+  };
+}
+
 export class ReservasService {
   /**
    * RF-03: Reserva de turnos de una hora con seña del 30%
@@ -195,18 +220,7 @@ export class ReservasService {
       throw new AppError('La reserva ya se encuentra cancelada', 400);
     }
 
-    // Calcular anticipación en horas con parsing robusto de fecha/hora MySQL y en-memoria
-    const dateStr = reserva.fecha instanceof Date
-      ? reserva.fecha.toISOString().split('T')[0]
-      : String(reserva.fecha).split('T')[0];
-    const horaStr = reserva.hora.length === 5 ? `${reserva.hora}:00` : reserva.hora;
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const [hh, mm, ss] = horaStr.split(':').map(Number);
-    const reservaDateTime = new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0);
-    const now = new Date();
-    const diffHours = (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-    const aplicaDevolucion = diffHours > 24;
+    const { diffHours, horasAnticipacion, aplicaDevolucion } = computeCancelTerms(reserva);
 
     if (isDbConnected()) {
       const pool = getPool()!;
@@ -466,18 +480,32 @@ export class ReservasService {
          ORDER BY r.fecha DESC, r.hora DESC`,
         [userId]
       );
-      return rows;
+      return rows.map((r: any) => {
+        const terms = computeCancelTerms(r);
+        return {
+          ...r,
+          horas_anticipacion: terms.horasAnticipacion,
+          aplica_devolucion: terms.aplicaDevolucion,
+          horasAnticipacion: terms.horasAnticipacion,
+          aplicaDevolucion: terms.aplicaDevolucion,
+        };
+      });
     } else {
       return store.reservas
         .filter(r => r.fk_usuario_id === userId)
         .map(r => {
           const c = store.canchas.find(ca => ca.id === r.fk_cancha_id);
+          const terms = computeCancelTerms(r);
           return {
             ...r,
             cancha_nombre: c?.nombre || 'Cancha',
             deporte: c?.deporte || 'Futbol 5',
             superficie: c?.superficie || 'Sintético',
             techada: c?.techada || false,
+            horas_anticipacion: terms.horasAnticipacion,
+            aplica_devolucion: terms.aplicaDevolucion,
+            horasAnticipacion: terms.horasAnticipacion,
+            aplicaDevolucion: terms.aplicaDevolucion,
           };
         })
         .sort((a, b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
@@ -499,8 +527,17 @@ export class ReservasService {
         params.push(fecha);
       }
       query += ' ORDER BY r.fecha DESC, r.hora ASC';
-      const [rows] = await pool.query(query, params);
-      return rows;
+      const [rows]: any = await pool.query(query, params);
+      return rows.map((r: any) => {
+        const terms = computeCancelTerms(r);
+        return {
+          ...r,
+          horas_anticipacion: terms.horasAnticipacion,
+          aplica_devolucion: terms.aplicaDevolucion,
+          horasAnticipacion: terms.horasAnticipacion,
+          aplicaDevolucion: terms.aplicaDevolucion,
+        };
+      });
     } else {
       let list = store.reservas;
       if (fecha) {
@@ -509,6 +546,7 @@ export class ReservasService {
       return list.map(r => {
         const c = store.canchas.find(ca => ca.id === r.fk_cancha_id);
         const u = store.usuarios.find(user => user.id === r.fk_usuario_id);
+        const terms = computeCancelTerms(r);
         return {
           ...r,
           cancha_nombre: c?.nombre || 'Cancha',
@@ -517,9 +555,50 @@ export class ReservasService {
           usuario_email: u?.email || '',
           usuario_telefono: u?.telefono || '',
           inasistencias: u?.inasistencias || 0,
+          horas_anticipacion: terms.horasAnticipacion,
+          aplica_devolucion: terms.aplicaDevolucion,
+          horasAnticipacion: terms.horasAnticipacion,
+          aplicaDevolucion: terms.aplicaDevolucion,
         };
       });
     }
+  }
+
+  async getCancelacionInfo(reservaId: number, userId: number, userRol: string) {
+    let reserva: any = null;
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query(
+        'SELECT r.*, c.nombre as cancha_nombre FROM reserva r JOIN cancha c ON r.fk_cancha_id = c.id WHERE r.id = ?',
+        [reservaId]
+      );
+      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
+      reserva = rows[0];
+    } else {
+      reserva = store.reservas.find(r => r.id === reservaId);
+      if (!reserva) throw new AppError('Reserva no encontrada', 404);
+      const c = store.canchas.find(ca => ca.id === reserva.fk_cancha_id);
+      reserva.cancha_nombre = c?.nombre || 'Cancha';
+    }
+
+    if (reserva.fk_usuario_id !== userId && userRol !== 'Administrador') {
+      throw new AppError('No tienes autorización para consultar esta reserva', 403);
+    }
+
+    const { horasAnticipacion, aplicaDevolucion } = computeCancelTerms(reserva);
+    const montoSena = Number(reserva.monto_sena) || 0;
+
+    return {
+      reservaId,
+      estado: reserva.estado,
+      aplicaDevolucion,
+      horasAnticipacion,
+      montoSena,
+      montoSenaDevuelto: aplicaDevolucion ? montoSena : 0,
+      mensaje: aplicaDevolucion
+        ? 'Aplica reintegro del 100% de la seña por cancelarse con más de 24 horas de antelación.'
+        : 'No aplica reintegro de seña por cancelarse con menos de 24 horas de antelación.',
+    };
   }
 }
 

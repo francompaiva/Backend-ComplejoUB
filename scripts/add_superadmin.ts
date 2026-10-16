@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import bcrypt from 'bcryptjs';
 import { getPool, initDatabase } from '../src/config/database.js';
 

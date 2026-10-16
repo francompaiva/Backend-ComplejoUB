@@ -25,6 +25,18 @@ export class ReservasController {
     }
   }
 
+  async getCancelacionInfo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const reservaId = parseInt(req.params.id, 10);
+      const userId = req.user!.id;
+      const userRol = req.user!.rol;
+      const result = await reservasService.getCancelacionInfo(reservaId, userId, userRol);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async registrarInasistencia(req: Request, res: Response, next: NextFunction) {
     try {
       const reservaId = parseInt(req.params.id, 10);
