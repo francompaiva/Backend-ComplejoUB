@@ -109,7 +109,9 @@ export class EquiposService {
    */
   async inscribirEquipo(capitanId: number, data: InscribirEquipoDTO) {
     const rawTorneoId = data.torneoId || (data as any).tournamentId || (data as any).fk_torneo_id;
-    const torneoId = parseInt(String(rawTorneoId), 10);
+    const torneoId = typeof rawTorneoId === 'number'
+      ? rawTorneoId
+      : parseInt(String(rawTorneoId).replace(/\D/g, ''), 10) || parseInt(String(rawTorneoId), 10);
     const nombreEquipo = (data.nombreEquipo || (data as any).nombre || (data as any).teamName || '').trim();
 
     if (!torneoId || !nombreEquipo) {

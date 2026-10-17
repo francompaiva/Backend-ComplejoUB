@@ -8,6 +8,7 @@ export interface UsuarioModel {
   estado_cuenta: 'Activa' | 'Suspendida' | 'Inactiva';
   suspension_hasta: string | null;
   telefono?: string;
+  dni?: string | null;
   email_verificado?: boolean;
   codigo_verificacion?: string | null;
   codigo_expiracion?: string | null;
@@ -318,6 +319,20 @@ export class InMemoryStore {
       fecha_fin: '2026-12-10',
       estado: 'INSCRIPCION_ABIERTA',
       reglamento: 'Partidos al mejor de 3 sets.',
+    },
+    {
+      id: 3,
+      nombre: 'Copa Clausura - Fútbol 5',
+      deporte: 'Futbol 5',
+      costo_inscripcion: 45000,
+      valor_partido: 7500,
+      max_equipos: 8,
+      min_jugadores_equipo: 5,
+      max_jugadores_equipo: 10,
+      fecha_inicio: '2026-11-20',
+      fecha_fin: '2026-12-30',
+      estado: 'INSCRIPCION_ABIERTA',
+      reglamento: 'Fútbol 5 sintético con árbitro oficial. Modalidad liga todos contra todos.',
     },
   ];
 
