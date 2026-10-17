@@ -1,3 +1,13 @@
+import bcrypt from 'bcryptjs';
+
+const INITIAL_SEED_PASSWORD =
+  process.env.INITIAL_SEED_PASSWORD ||
+  process.env.ADMIN_INITIAL_PASSWORD ||
+  'DevSeed_Ub2026!';
+
+// Hash generado dinámicamente en tiempo de ejecución para evitar secretos estáticos en el repositorio
+const dynamicSeedHash = bcrypt.hashSync(INITIAL_SEED_PASSWORD, 10);
+
 export interface UsuarioModel {
   id: number;
   nombre: string;
@@ -145,7 +155,7 @@ export class InMemoryStore {
       id: 1,
       nombre: 'Administrador General',
       email: 'admin@complejoub.com',
-      contrasena_hash: '$2b$10$OOcb1yKyP4.21M2wsN9O1uYbJOroN6mwO5diqjU8baMZh8fepruBy',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Superadministrador',
       email_verificado: true,
       inasistencias: 0,
@@ -158,7 +168,7 @@ export class InMemoryStore {
       id: 2,
       nombre: 'Sebastian Norjean (Árbitro)',
       email: 'arbitro@complejoub.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Arbitro',
       email_verificado: true,
       inasistencias: 0,
@@ -171,7 +181,7 @@ export class InMemoryStore {
       id: 3,
       nombre: 'Marcos Perez del Cerro',
       email: 'mperez@complejoub.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Arbitro',
       email_verificado: true,
       inasistencias: 0,
@@ -184,7 +194,7 @@ export class InMemoryStore {
       id: 4,
       nombre: 'Lucas Díaz (Cliente / Capitán)',
       email: 'lucas@gmail.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Cliente',
       email_verificado: true,
       inasistencias: 0,
@@ -197,7 +207,7 @@ export class InMemoryStore {
       id: 5,
       nombre: 'Mateo Fernández',
       email: 'mateo@gmail.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Cliente',
       email_verificado: true,
       inasistencias: 1,
@@ -210,7 +220,7 @@ export class InMemoryStore {
       id: 6,
       nombre: 'Juan Paiva',
       email: 'juan@gmail.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Cliente',
       email_verificado: true,
       inasistencias: 0,
@@ -223,7 +233,7 @@ export class InMemoryStore {
       id: 7,
       nombre: 'Diego López',
       email: 'diego@gmail.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Cliente',
       email_verificado: true,
       inasistencias: 0,
@@ -236,7 +246,7 @@ export class InMemoryStore {
       id: 12,
       nombre: 'Usuario Sancionado Test',
       email: 'sancionado@gmail.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Cliente',
       email_verificado: true,
       inasistencias: 3,
@@ -249,7 +259,7 @@ export class InMemoryStore {
       id: 13,
       nombre: 'Administrador de Sede',
       email: 'operador@complejoub.com',
-      contrasena_hash: '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Administrador',
       inasistencias: 0,
       estado_cuenta: 'Activa',
@@ -262,7 +272,7 @@ export class InMemoryStore {
       id: 15,
       nombre: 'Superadministrador General',
       email: 'complejoub.soporte@gmail.com',
-      contrasena_hash: '$2b$10$OOcb1yKyP4.21M2wsN9O1uYbJOroN6mwO5diqjU8baMZh8fepruBy',
+      contrasena_hash: dynamicSeedHash,
       rol: 'Superadministrador',
       inasistencias: 0,
       estado_cuenta: 'Activa',

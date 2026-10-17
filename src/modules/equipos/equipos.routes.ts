@@ -8,6 +8,10 @@ const router = Router();
 router.get('/mis-invitaciones', authMiddleware, (req, res, next) => equiposController.getMisInvitaciones(req, res, next));
 router.get('/invitaciones', authMiddleware, (req, res, next) => equiposController.getMisInvitaciones(req, res, next));
 
+// Historial de equipos y torneos del usuario autenticado (RF-15 / Perfil)
+router.get('/mis-equipos', authMiddleware, (req, res, next) => equiposController.getMisEquipos(req, res, next));
+router.get('/historial', authMiddleware, (req, res, next) => equiposController.getMisEquipos(req, res, next));
+
 // Consultas de equipos (públicas o autenticadas)
 router.get('/', (req, res, next) => equiposController.getAll(req, res, next));
 router.get('/:id', (req, res, next) => equiposController.getById(req, res, next));

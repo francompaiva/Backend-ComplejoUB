@@ -1,7 +1,7 @@
 -- =============================================================================
 -- COMPLEJO DEPORTIVO UB - DATOS DE PRUEBA (SEEDS)
--- Contraseñas de prueba: "password123" hasheada con bcrypt o texto para el demo
--- $2b$10$wT8m9LpB19nQ1dK7Rqm8I.xY7yq6kZp.cT0yRk5xM8x7J5Yn6zK9a (hash de 'password123')
+-- La inserción de contraseñas de usuarios se gestiona mediante el seeder dinámico
+-- en TypeScript: npm run seed (src/scripts/seed.ts) consumiendo INITIAL_SEED_PASSWORD del .env
 -- =============================================================================
 
 USE complejo_deportivo;
@@ -21,22 +21,25 @@ DELETE FROM usuario;
 
 -- -----------------------------------------------------------------------------
 -- 1. USUARIOS (Clientes, Administradores, Árbitros)
+-- Variable de sesión para hash seguro generado por el seeder
 -- -----------------------------------------------------------------------------
+SET @SEED_PASSWORD_HASH = COALESCE(@SEED_PASSWORD_HASH, '$2b$10$placeholder.dynamic.seed.hash.complejoub.seed.2026');
+
 INSERT INTO usuario (id, nombre, email, contrasena_hash, rol, inasistencias, estado_cuenta, suspension_hasta, dni, telefono) VALUES
-(1, 'Administrador General', 'admin@complejoub.com', '$2b$10$OOcb1yKyP4.21M2wsN9O1uYbJOroN6mwO5diqjU8baMZh8fepruBy', 'Superadministrador', 0, 'Activa', NULL, '30111222', '+54 11 4567-8901'),
-(2, 'Sebastian Norjean (Árbitro)', 'arbitro@complejoub.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Arbitro', 0, 'Activa', NULL, '32333444', '+54 11 5555-1122'),
-(3, 'Marcos Perez del Cerro', 'mperez@complejoub.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Arbitro', 0, 'Activa', NULL, '33444555', '+54 11 5555-3344'),
-(4, 'Lucas Díaz (Cliente / Capitán)', 'lucas@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '40123456', '+54 11 9876-5432'),
-(5, 'Mateo Fernández', 'mateo@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 1, 'Activa', NULL, '41229400', '+54 11 9876-5433'),
-(6, 'Juan Paiva', 'juan@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '42110339', '+54 11 9876-5434'),
-(7, 'Diego López', 'diego@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '40887652', '+54 11 9876-5435'),
-(8, 'Gonzalo Higuaín', 'gonzalo@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '38109223', '+54 11 9876-5436'),
-(9, 'Julián Álvarez', 'julian@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '41554912', '+54 11 9876-5437'),
-(10, 'Enzo Fernández', 'enzo@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '42991442', '+54 11 9876-5438'),
-(11, 'Rodrigo De Paul', 'rodrigo@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 0, 'Activa', NULL, '39001992', '+54 11 9876-5439'),
-(12, 'Usuario Sancionado Test', 'sancionado@gmail.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Cliente', 3, 'Suspendida', DATE_ADD(NOW(), INTERVAL 14 DAY), '35999888', '+54 11 9876-9999'),
-(13, 'Administrador de Sede', 'operador@complejoub.com', '$2b$10$NASReOD/BuV36GsDvccolOmCU5yD3s5iWHXPTHvu6uG.nv/8lAW5.', 'Administrador', 0, 'Activa', NULL, '30555666', '+54 11 4444-5555'),
-(15, 'Superadministrador General', 'complejoub.soporte@gmail.com', '$2b$10$OOcb1yKyP4.21M2wsN9O1uYbJOroN6mwO5diqjU8baMZh8fepruBy', 'Superadministrador', 0, 'Activa', NULL, '30111999', '+54 11 4567-8902');
+(1, 'Administrador General', 'admin@complejoub.com', @SEED_PASSWORD_HASH, 'Superadministrador', 0, 'Activa', NULL, '30111222', '+54 11 4567-8901'),
+(2, 'Sebastian Norjean (Árbitro)', 'arbitro@complejoub.com', @SEED_PASSWORD_HASH, 'Arbitro', 0, 'Activa', NULL, '32333444', '+54 11 5555-1122'),
+(3, 'Marcos Perez del Cerro', 'mperez@complejoub.com', @SEED_PASSWORD_HASH, 'Arbitro', 0, 'Activa', NULL, '33444555', '+54 11 5555-3344'),
+(4, 'Lucas Díaz (Cliente / Capitán)', 'lucas@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '40123456', '+54 11 9876-5432'),
+(5, 'Mateo Fernández', 'mateo@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 1, 'Activa', NULL, '41229400', '+54 11 9876-5433'),
+(6, 'Juan Paiva', 'juan@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '42110339', '+54 11 9876-5434'),
+(7, 'Diego López', 'diego@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '40887652', '+54 11 9876-5435'),
+(8, 'Gonzalo Higuaín', 'gonzalo@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '38109223', '+54 11 9876-5436'),
+(9, 'Julián Álvarez', 'julian@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '41554912', '+54 11 9876-5437'),
+(10, 'Enzo Fernández', 'enzo@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '42991442', '+54 11 9876-5438'),
+(11, 'Rodrigo De Paul', 'rodrigo@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 0, 'Activa', NULL, '39001992', '+54 11 9876-5439'),
+(12, 'Usuario Sancionado Test', 'sancionado@gmail.com', @SEED_PASSWORD_HASH, 'Cliente', 3, 'Suspendida', DATE_ADD(NOW(), INTERVAL 14 DAY), '35999888', '+54 11 9876-9999'),
+(13, 'Administrador de Sede', 'operador@complejoub.com', @SEED_PASSWORD_HASH, 'Administrador', 0, 'Activa', NULL, '30555666', '+54 11 4444-5555'),
+(15, 'Superadministrador General', 'complejoub.soporte@gmail.com', @SEED_PASSWORD_HASH, 'Superadministrador', 0, 'Activa', NULL, '30111999', '+54 11 4567-8902');
 
 -- -----------------------------------------------------------------------------
 -- 2. CANCHAS

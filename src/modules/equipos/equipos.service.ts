@@ -15,6 +15,13 @@ export interface InvitarJugadorDTO {
   dorsal?: number;
 }
 
+export function getPosicionesValidas(deporte?: string): string[] {
+  const dep = (deporte || '').toLowerCase();
+  if (dep.includes('padel') || dep.includes('pádel')) return ['Drive', 'Revés'];
+  if (dep.includes('tenis')) return ['Single', 'Dobles', 'Drive', 'Revés'];
+  return ['Arquero', 'Defensor', 'Mediocampista', 'Delantero'];
+}
+
 export class EquiposService {
   async getAll(torneoId?: number): Promise<any[]> {
     if (isDbConnected()) {
@@ -135,6 +142,39 @@ export class EquiposService {
     await this.validarNoParticipaEnTorneo(capitanId, torneoId);
 
     const playerList = data.players || (data as any).jugadores || [];
+
+    // Validaciones estrictas de DNI (7 u 8 dígitos numéricos, sin letras ni símbolos) y posición reglamentaria
+    const DNI_REGEX = /^\d{7,8}$/;
+    const posicionesValidas = getPosicionesValidas(torneo.deporte);
+
+    if (Array.isArray(playerList) && playerList.length > 0) {
+      for (let i = 0; i < playerList.length; i++) {
+        const p = playerList[i];
+        const dni = String(p.dni || p.documento || '').trim();
+        const pos = String(p.position || p.posicion || '').trim();
+
+        if (!dni) {
+          throw new AppError(`El DNI del jugador #${i + 1} (${p.name || p.nombre || 'Sin nombre'}) es obligatorio`, 400);
+        }
+        if (!DNI_REGEX.test(dni)) {
+          throw new AppError(
+            `El DNI '${dni}' del jugador #${i + 1} es inválido: debe contener exactamente 7 u 8 dígitos numéricos sin letras, espacios, puntos ni símbolos`,
+            400
+          );
+        }
+
+        if (!pos) {
+          throw new AppError(`La posición del jugador #${i + 1} (${p.name || p.nombre || 'Sin nombre'}) es obligatoria`, 400);
+        }
+        const isPosValid = posicionesValidas.some(v => v.localeCompare(pos, undefined, { sensitivity: 'accent' }) === 0);
+        if (!isPosValid) {
+          throw new AppError(
+            `La posición '${pos}' del jugador #${i + 1} no es válida para ${torneo.deporte}. Posiciones permitidas: ${posicionesValidas.join(', ')}`,
+            400
+          );
+        }
+      }
+    }
 
     if (isDbConnected()) {
       const pool = getPool()!;
@@ -348,6 +388,52 @@ export class EquiposService {
           deporte: t?.deporte || 'Futbol 5',
           capitan_nombre: c?.nombre || 'Capitán',
           capitan_email: c?.email || '',
+        };
+      });
+    }
+  }
+
+  /**
+   * RF-15 / Perfil: Obtener historial de equipos y torneos del usuario (capitán o miembro aceptado)
+   */
+  async getMisEquipos(usuarioId: number) {
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query(
+        `SELECT e.id as equipo_id, e.nombre as equipo_nombre, e.fk_torneo_id as torneo_id,
+                t.nombre as torneo_nombre, t.deporte, t.estado as torneo_estado,
+                ej.es_capitan, ej.dorsal, ej.estado_invitacion, ej.fecha_alta,
+                u.nombre as capitan_nombre, u.email as capitan_email
+         FROM equipo_jugador ej
+         JOIN equipo e ON ej.fk_equipo_id = e.id
+         JOIN torneo t ON e.fk_torneo_id = t.id
+         JOIN usuario u ON e.fk_capitan_id = u.id
+         WHERE ej.fk_usuario_id = ? AND ej.estado_invitacion = 'ACEPTADA'
+         ORDER BY ej.fecha_alta DESC`,
+        [usuarioId]
+      );
+      return rows;
+    } else {
+      const memberships = store.equipoJugadores.filter(
+        ej => ej.fk_usuario_id === usuarioId && ej.estado_invitacion === 'ACEPTADA'
+      );
+      return memberships.map(ej => {
+        const e = store.equipos.find(eq => eq.id === ej.fk_equipo_id);
+        const t = e ? store.torneos.find(tor => tor.id === e.fk_torneo_id) : null;
+        const cap = e ? store.usuarios.find(u => u.id === e.fk_capitan_id) : null;
+        return {
+          equipo_id: ej.fk_equipo_id,
+          equipo_nombre: e?.nombre || 'Equipo',
+          torneo_id: t?.id,
+          torneo_nombre: t?.nombre || 'Torneo Oficial',
+          deporte: t?.deporte || 'Futbol 5',
+          torneo_estado: t?.estado || 'EN_CURSO',
+          es_capitan: ej.es_capitan,
+          dorsal: ej.dorsal,
+          estado_invitacion: ej.estado_invitacion,
+          fecha_alta: ej.fecha_alta,
+          capitan_nombre: cap?.nombre || '',
+          capitan_email: cap?.email || '',
         };
       });
     }

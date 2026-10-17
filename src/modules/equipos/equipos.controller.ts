@@ -65,6 +65,16 @@ export class EquiposController {
       next(error);
     }
   }
+
+  async getMisEquipos(req: Request, res: Response, next: NextFunction) {
+    try {
+      const usuarioId = req.user!.id;
+      const equipos = await equiposService.getMisEquipos(usuarioId);
+      res.status(200).json({ success: true, data: equipos });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const equiposController = new EquiposController();

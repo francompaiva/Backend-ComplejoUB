@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { ReservasService } from '../modules/reservas/reservas.service.js';
 import { TorneosService } from '../modules/torneos/torneos.service.js';
 import { AuthService } from '../modules/auth/auth.service.js';
+import { EquiposService } from '../modules/equipos/equipos.service.js';
 import { store } from '../config/in-memory-store.js';
 
 describe('Reglas de Negocio - Complejo Deportivo UB', () => {
   const reservasService = new ReservasService();
   const torneosService = new TorneosService();
   const authService = new AuthService();
+  const equiposService = new EquiposService();
 
   it('RF-03: Cálculo exacto de seña del 30% al reservar', async () => {
     // Cancha 1 (Fútbol 5) cuesta $18.000 -> la seña del 30% debe ser $5.400
@@ -239,7 +241,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     await authService.register({
       nombre: 'Usuario Malicioso',
       email: testEmail,
-      contrasena: 'password123',
+      contrasena: 'SecurityTest2026!',
       rol: 'Administrador' as any,
     });
 
@@ -275,6 +277,75 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     assert.equal(profile.estado_cuenta, 'Activa');
     assert.equal(profile.inasistencias, 0);
     assert.equal(profile.suspension_hasta, null);
+  });
+
+  it('Validación de DNI: Inscribir equipo con DNI inválido debe ser rechazado', async () => {
+    // Torneo 3 está en INSCRIPCION_ABIERTA
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(4, {
+          torneoId: 3,
+          nombreEquipo: 'Equipo DNI Invalido',
+          players: [
+            { name: 'Lucas Diaz', dni: '40123456', position: 'Delantero' },
+            { name: 'Jugador Mal DNI', dni: 'DNI1234', position: 'Defensor' }
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('DNI');
+      }
+    );
+  });
+
+  it('Validación de Posición: Inscribir jugador con posición inválida para el deporte debe ser rechazado', async () => {
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(4, {
+          torneoId: 3, // Fútbol 5
+          nombreEquipo: 'Equipo Posicion Invalida',
+          players: [
+            { name: 'Lucas Diaz', dni: '40123456', position: 'Delantero' },
+            { name: 'Jugador Tenista en Futbol', dni: '38123456', position: 'Drive' } // 'Drive' no es válida para Fútbol 5
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('posición');
+      }
+    );
+  });
+
+  it('Historial de Equipos y Torneos: Aceptar invitación asocia al jugador y se refleja en getMisEquipos', async () => {
+    // 1. Crear equipo e invitar al usuario 5 (Cliente)
+    const eq = await equiposService.inscribirEquipo(4, {
+      torneoId: 3,
+      nombreEquipo: `Equipo Historial Test ${Date.now()}`,
+      players: [
+        { name: 'Lucas Diaz', dni: '40123456', position: 'Delantero' },
+        { name: 'Jugador 2', dni: '41123456', position: 'Defensor' },
+        { name: 'Jugador 3', dni: '42123456', position: 'Mediocampista' },
+        { name: 'Jugador 4', dni: '43123456', position: 'Defensor' },
+        { name: 'Jugador 5', dni: '44123456', position: 'Arquero' }
+      ]
+    });
+
+    // 2. Invitar al usuario 5 (email: mateo@gmail.com)
+    await equiposService.invitarJugador(eq.id, 4, {
+      emailUsuario: 'mateo@gmail.com',
+      dorsal: 7
+    });
+
+    // 3. Usuario 5 acepta la invitación
+    const resp = await equiposService.responderInvitacion(eq.id, 5, 'ACEPTADA');
+    assert.equal(resp.success, true);
+    assert.equal(resp.estado, 'ACEPTADA');
+
+    // 4. Verificar que getMisEquipos(5) devuelve este nuevo equipo y torneo
+    const misEquipos = await equiposService.getMisEquipos(5);
+    const found = misEquipos.find((m: any) => m.equipo_id === eq.id || m.equipo_nombre === eq.nombre);
+    assert.ok(found, 'El equipo aceptado debe figurar en el historial de equipos y torneos del usuario');
+    assert.equal(found.estado_invitacion, 'ACEPTADA');
   });
 });
 

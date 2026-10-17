@@ -44,7 +44,7 @@ export const swaggerDocument = {
         properties: {
           nombre: { type: 'string', example: 'Juan Pérez' },
           email: { type: 'string', format: 'email', example: 'usuario@ejemplo.com' },
-          contrasena: { type: 'string', format: 'password', minLength: 6, example: 'Password123' },
+          contrasena: { type: 'string', format: 'password', minLength: 6, example: 'UserSecurePass_2026!' },
           telefono: { type: 'string', example: '1122334455' },
         },
       },
@@ -53,7 +53,7 @@ export const swaggerDocument = {
         required: ['email', 'contrasena'],
         properties: {
           email: { type: 'string', format: 'email', example: 'usuario@ejemplo.com' },
-          contrasena: { type: 'string', format: 'password', example: 'Password123' },
+          contrasena: { type: 'string', format: 'password', example: 'UserSecurePass_2026!' },
         },
       },
       CreateReservaDTO: {
@@ -425,7 +425,7 @@ export const swaggerDocument = {
                 properties: {
                   nombre: { type: 'string', example: 'Admin General' },
                   email: { type: 'string', format: 'email', example: 'admin@complejoub.com' },
-                  contrasena: { type: 'string', example: 'ClaveSegura2026' },
+                  contrasena: { type: 'string', example: 'AdminSecurePass_2026!' },
                   rol: { type: 'string', enum: ['Administrador', 'Arbitro'], example: 'Administrador' },
                   telefono: { type: 'string' },
                 },
