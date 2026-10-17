@@ -3,12 +3,6 @@
 -- MODELO DE DATOS RELACIONAL (DDL MySQL 8.0+)
 -- =============================================================================
 
-CREATE DATABASE IF NOT EXISTS complejo_deportivo
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE complejo_deportivo;
-
 -- Desactivar temporalmente chequeos de claves foráneas para recreación segura
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -41,9 +35,12 @@ CREATE TABLE usuario (
   dni VARCHAR(20) NULL,
   telefono VARCHAR(30) NULL,
   posicion_preferida VARCHAR(50) NULL,
+  email_verificado BOOLEAN NOT NULL DEFAULT true,
+  codigo_verificacion VARCHAR(10) NULL,
+  codigo_expiracion DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT chk_usuario_rol CHECK (rol IN ('Cliente', 'Administrador', 'Arbitro')),
+  CONSTRAINT chk_usuario_rol CHECK (rol IN ('Cliente', 'Administrador', 'Arbitro', 'Superadministrador')),
   CONSTRAINT chk_usuario_inasistencias CHECK (inasistencias >= 0),
   CONSTRAINT chk_usuario_estado CHECK (estado_cuenta IN ('Activa', 'Suspendida', 'Inactiva'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -104,8 +104,8 @@ export class CanchasService {
       let estado: 'Libre' | 'Ocupado' | 'DeshabilitadoTorneo' | 'Mantenimiento' = 'Libre';
       let motivo = '';
 
-      const [y, m, d] = fechaStr.split('-').map(Number);
-      const slotDateTime = new Date(y, m - 1, d, h, 0, 0);
+      // Evaluación horaria en zona horaria oficial del Complejo (Argentina: UTC-3)
+      const slotDateTime = new Date(`${fechaStr}T${hourStr}-03:00`);
       const yaPaso = slotDateTime.getTime() <= Date.now();
 
       if (yaPaso) {

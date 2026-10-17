@@ -4,9 +4,8 @@
 -- en TypeScript: npm run seed (src/scripts/seed.ts) consumiendo INITIAL_SEED_PASSWORD del .env
 -- =============================================================================
 
-USE complejo_deportivo;
-
--- Limpieza previa en orden referencial
+-- Limpieza previa segura desactivando temporalmente FK checks
+SET FOREIGN_KEY_CHECKS = 0;
 DELETE FROM audit_log;
 DELETE FROM notificacion;
 DELETE FROM sancion;
@@ -18,6 +17,7 @@ DELETE FROM lista_espera;
 DELETE FROM reserva;
 DELETE FROM cancha;
 DELETE FROM usuario;
+SET FOREIGN_KEY_CHECKS = 1;
 
 -- -----------------------------------------------------------------------------
 -- 1. USUARIOS (Clientes, Administradores, Árbitros)

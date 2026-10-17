@@ -9,7 +9,10 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "test": "tsx --test src/__tests__/business-rules.test.ts",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "db:setup": "tsx src/scripts/setup-db.ts",
+    "db:schema": "tsx src/scripts/setup-db.ts --schema-only",
+    "db:seed": "tsx src/scripts/setup-db.ts --seed-only"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

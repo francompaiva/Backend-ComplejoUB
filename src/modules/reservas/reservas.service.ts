@@ -17,9 +17,10 @@ export function computeCancelTerms(reserva: any) {
     ? reserva.fecha.toISOString().split('T')[0]
     : String(reserva.fecha).split('T')[0];
   const horaStr = reserva.hora ? (reserva.hora.length === 5 ? `${reserva.hora}:00` : String(reserva.hora)) : '00:00:00';
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const [hh, mm, ss] = horaStr.split(':').map(Number);
-  const reservaDateTime = new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0);
+  const cleanTime = horaStr.length === 5 ? `${horaStr}:00` : horaStr;
+  // Complejo UB opera en zona horaria de Argentina (UTC-3).
+  // Se evalúa con offset explícito para sincronía entre servidores cloud (UTC) y clientes.
+  const reservaDateTime = new Date(`${dateStr}T${cleanTime}-03:00`);
   const now = new Date();
   const diffHours = (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
@@ -46,13 +47,14 @@ export class ReservasService {
     if (hora.length === 5) hora = `${hora}:00`;
 
     // Validar que la fecha y hora seleccionada no pertenezca al pasado
+    // Se utiliza la zona horaria oficial del Complejo Deportivo UB (Argentina: UTC-3)
     const cleanDateStr = fecha.includes('T') ? fecha.split('T')[0] : fecha;
     const cleanTimeStr = hora.length === 5 ? `${hora}:00` : hora;
-    const [year, month, day] = cleanDateStr.split('-').map(Number);
-    const [hours, minutes] = cleanTimeStr.split(':').map(Number);
-    const turnoDate = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+    const turnoDate = new Date(`${cleanDateStr}T${cleanTimeStr}-03:00`);
 
-    if (turnoDate.getTime() <= Date.now()) {
+    // Tolerancia de 5 minutos de gracia por latencia de red y llenado de datos de pago
+    const toleranciaGraciaMs = 5 * 60 * 1000;
+    if (turnoDate.getTime() + toleranciaGraciaMs <= Date.now()) {
       throw new AppError('No es posible reservar un turno para una fecha u horario que ya ha transcurrido', 400);
     }
 
