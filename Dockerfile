@@ -1,4 +1,5 @@
-FROM node:20-alpine
+# Etapa 1: Build y compilación TypeScript
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -8,6 +9,19 @@ RUN npm install
 COPY . .
 RUN npm run build
 
+# Etapa 2: Imagen final de producción ligera
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=4000
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY --from=builder /app/dist ./dist
+
 EXPOSE 4000
 
-CMD ["npm", "start"]
+CMD ["node", "dist/server.js"]

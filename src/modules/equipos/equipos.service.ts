@@ -108,8 +108,9 @@ export class EquiposService {
    * RF-16: Evita que el capitán o jugadores participen en más de un equipo del mismo torneo
    */
   async inscribirEquipo(capitanId: number, data: InscribirEquipoDTO) {
-    const torneoId = parseInt(String(data.torneoId), 10);
-    const nombreEquipo = (data.nombreEquipo || (data as any).nombre || '').trim();
+    const rawTorneoId = data.torneoId || (data as any).tournamentId || (data as any).fk_torneo_id;
+    const torneoId = parseInt(String(rawTorneoId), 10);
+    const nombreEquipo = (data.nombreEquipo || (data as any).nombre || (data as any).teamName || '').trim();
 
     if (!torneoId || !nombreEquipo) {
       throw new AppError('Torneo y nombre del equipo son requeridos', 400);
@@ -117,7 +118,8 @@ export class EquiposService {
 
     const torneo = await torneosService.getById(torneoId);
     const estadoNorm = (torneo.estado || '').toUpperCase().replace(/\s+/g, '_');
-    if (estadoNorm !== 'INSCRIPCION_ABIERTA' && estadoNorm !== 'INSCRIPCIONES_ABIERTAS') {
+    const isAbierto = estadoNorm === 'INSCRIPCION_ABIERTA' || estadoNorm === 'INSCRIPCIONES_ABIERTAS' || estadoNorm === 'ABIERTA';
+    if (!isAbierto) {
       throw new AppError('Las inscripciones para este torneo ya no se encuentran abiertas', 400);
     }
 
@@ -306,26 +308,87 @@ export class EquiposService {
   }
 
   /**
+   * RF-15: Obtener invitaciones pendientes del usuario actual
+   */
+  async getMisInvitaciones(usuarioId: number) {
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query(
+        `SELECT ej.fk_equipo_id as equipo_id, ej.fk_usuario_id, ej.dorsal, ej.es_capitan, ej.estado_invitacion, ej.fecha_alta,
+                e.nombre as equipo_nombre, e.fk_torneo_id as torneo_id, t.nombre as torneo_nombre, t.deporte,
+                u.nombre as capitan_nombre, u.email as capitan_email
+         FROM equipo_jugador ej
+         JOIN equipo e ON ej.fk_equipo_id = e.id
+         JOIN torneo t ON e.fk_torneo_id = t.id
+         JOIN usuario u ON e.fk_capitan_id = u.id
+         WHERE ej.fk_usuario_id = ? AND ej.estado_invitacion = 'PENDIENTE'
+         ORDER BY ej.fecha_alta DESC`,
+        [usuarioId]
+      );
+      return rows;
+    } else {
+      const list = store.equipoJugadores.filter(ej => ej.fk_usuario_id === usuarioId && ej.estado_invitacion === 'PENDIENTE');
+      return list.map(ej => {
+        const e = store.equipos.find(eq => eq.id === ej.fk_equipo_id);
+        const t = e ? store.torneos.find(tor => tor.id === e.fk_torneo_id) : null;
+        const c = e ? store.usuarios.find(u => u.id === e.fk_capitan_id) : null;
+        return {
+          equipo_id: ej.fk_equipo_id,
+          fk_equipo_id: ej.fk_equipo_id,
+          fk_usuario_id: ej.fk_usuario_id,
+          dorsal: ej.dorsal,
+          es_capitan: ej.es_capitan,
+          estado_invitacion: ej.estado_invitacion,
+          fecha_alta: ej.fecha_alta,
+          equipo_nombre: e?.nombre || 'Equipo',
+          torneo_id: t?.id,
+          torneo_nombre: t?.nombre || 'Torneo Oficial',
+          deporte: t?.deporte || 'Futbol 5',
+          capitan_nombre: c?.nombre || 'Capitán',
+          capitan_email: c?.email || '',
+        };
+      });
+    }
+  }
+
+  /**
    * RF-15: Aceptación o rechazo de invitaciones por el jugador
    */
   async responderInvitacion(equipoId: number, usuarioId: number, respuesta: 'ACEPTADA' | 'RECHAZADA') {
+    const cleanRespuesta: 'ACEPTADA' | 'RECHAZADA' = (respuesta || '').toUpperCase().includes('ACEP') ? 'ACEPTADA' : 'RECHAZADA';
+
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query('SELECT * FROM equipo_jugador WHERE fk_equipo_id = ? AND fk_usuario_id = ?', [equipoId, usuarioId]);
       if (!rows || rows.length === 0) throw new AppError('Invitación no encontrada', 404);
 
+      if (cleanRespuesta === 'ACEPTADA') {
+        const [eqRows]: any = await pool.query('SELECT fk_torneo_id FROM equipo WHERE id = ?', [equipoId]);
+        if (eqRows && eqRows.length > 0) {
+          await this.validarNoParticipaEnTorneo(usuarioId, eqRows[0].fk_torneo_id);
+        }
+      }
+
       await pool.query(
         'UPDATE equipo_jugador SET estado_invitacion = ?, fecha_respuesta = NOW() WHERE fk_equipo_id = ? AND fk_usuario_id = ?',
-        [respuesta, equipoId, usuarioId]
+        [cleanRespuesta, equipoId, usuarioId]
       );
     } else {
       const item = store.equipoJugadores.find(ej => ej.fk_equipo_id === equipoId && ej.fk_usuario_id === usuarioId);
       if (!item) throw new AppError('Invitación no encontrada', 404);
-      item.estado_invitacion = respuesta;
+
+      if (cleanRespuesta === 'ACEPTADA') {
+        const eq = store.equipos.find(e => e.id === equipoId);
+        if (eq) {
+          await this.validarNoParticipaEnTorneo(usuarioId, eq.fk_torneo_id);
+        }
+      }
+
+      item.estado_invitacion = cleanRespuesta;
       item.fecha_respuesta = new Date().toISOString();
     }
 
-    return { message: `Invitación ${respuesta.toLowerCase()} con éxito` };
+    return { success: true, estado: cleanRespuesta, message: `Invitación ${cleanRespuesta.toLowerCase()} con éxito` };
   }
 
   /**

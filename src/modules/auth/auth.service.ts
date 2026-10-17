@@ -21,7 +21,10 @@ export interface LoginDTO {
 
 export class AuthService {
   async register(data: RegisterDTO) {
-    const { nombre, email, contrasena, telefono } = data;
+    const nombre = (data.nombre || (data as any).name || '').trim();
+    const email = (data.email || '').trim();
+    const contrasena = data.contrasena || (data as any).password || '';
+    const telefono = (data.telefono || (data as any).phone || '').trim();
     // Seguridad y RBAC: En el registro público el rol siempre se restringe estrictamente a 'Cliente'.
     // La asignación de roles administrativos está restringida al endpoint protegido de administración.
     const rol = 'Cliente';
@@ -240,7 +243,8 @@ export class AuthService {
   }
 
   async login(data: LoginDTO) {
-    const { email, contrasena } = data;
+    const email = (data.email || '').trim();
+    const contrasena = data.contrasena || (data as any).password || '';
     if (!email || !contrasena) {
       throw new AppError('Email y contraseña son obligatorios', 400);
     }

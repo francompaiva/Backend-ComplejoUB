@@ -44,11 +44,21 @@ export class EquiposController {
     }
   }
 
+  async getMisInvitaciones(req: Request, res: Response, next: NextFunction) {
+    try {
+      const usuarioId = req.user!.id;
+      const invitaciones = await equiposService.getMisInvitaciones(usuarioId);
+      res.status(200).json({ success: true, data: invitaciones });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async responderInvitacion(req: Request, res: Response, next: NextFunction) {
     try {
       const equipoId = parseInt(req.params.id, 10);
       const usuarioId = req.user!.id;
-      const { respuesta } = req.body;
+      const respuesta = (req.body.respuesta || req.body.estado || req.body.action || 'ACEPTADA') as 'ACEPTADA' | 'RECHAZADA';
       const result = await equiposService.responderInvitacion(equipoId, usuarioId, respuesta);
       res.status(200).json({ success: true, data: result });
     } catch (error) {
