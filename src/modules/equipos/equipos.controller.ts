@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { equiposService } from './equipos.service.js';
+import { AppError } from '../../middlewares/error.middleware.js';
 
 export class EquiposController {
   async getAll(req: Request, res: Response, next: NextFunction) {
@@ -25,7 +26,10 @@ export class EquiposController {
 
   async inscribir(req: Request, res: Response, next: NextFunction) {
     try {
-      const capitanId = req.user?.id || 4;
+      const capitanId = req.user?.id;
+      if (!capitanId) {
+        throw new AppError('Usuario no autenticado. Debe iniciar sesión para inscribir un equipo.', 401);
+      }
       const equipo = await equiposService.inscribirEquipo(capitanId, req.body);
       return res.status(201).json({ success: true, data: equipo });
     } catch (error) {

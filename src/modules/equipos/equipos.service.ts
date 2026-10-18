@@ -39,6 +39,21 @@ export class EquiposService {
       }
       query += ' ORDER BY e.puntos DESC, e.diferencia_goles DESC';
       const [rows]: any = await pool.query(query, params);
+
+      // Enriquecer cada equipo con su nómina completa de jugadores
+      for (const eq of rows) {
+        const [jugadores]: any = await pool.query(
+          `SELECT ej.*, u.nombre, u.email, u.telefono, u.dni, u.posicion_preferida
+           FROM equipo_jugador ej
+           JOIN usuario u ON ej.fk_usuario_id = u.id
+           WHERE ej.fk_equipo_id = ?
+           ORDER BY ej.es_capitan DESC, ej.dorsal ASC`,
+          [eq.id]
+        );
+        eq.jugadores = jugadores || [];
+        eq.playersCount = (jugadores || []).length;
+      }
+
       return rows;
     } else {
       let list = store.equipos;
@@ -46,11 +61,27 @@ export class EquiposService {
       return list.map(e => {
         const t = store.torneos.find(tor => tor.id === e.fk_torneo_id);
         const c = store.usuarios.find(u => u.id === e.fk_capitan_id);
+        const jugadores = store.equipoJugadores
+          .filter(ej => ej.fk_equipo_id === e.id)
+          .map(ej => {
+            const u = store.usuarios.find(usr => usr.id === ej.fk_usuario_id);
+            return {
+              ...ej,
+              nombre: u?.nombre || '',
+              email: u?.email || '',
+              telefono: u?.telefono || '',
+              dni: u?.dni || '',
+            };
+          })
+          .sort((a, b) => (b.es_capitan ? 1 : 0) - (a.es_capitan ? 1 : 0));
+
         return {
           ...e,
           torneo_nombre: t?.nombre || '',
           capitan_nombre: c?.nombre || '',
           capitan_email: c?.email || '',
+          jugadores,
+          playersCount: jugadores.length,
         };
       });
     }
@@ -138,33 +169,54 @@ export class EquiposService {
       throw new AppError(`El cupo máximo de equipos (${torneo.max_equipos}) ya fue alcanzado`, 400);
     }
 
-    // RF-16: Control de participación - Un jugador/capitán no puede participar en más de un equipo dentro del mismo torneo
-    await this.validarNoParticipaEnTorneo(capitanId, torneoId);
+    // Obtener y validar estado del capitán
+    let capitanUser: any = null;
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [capRows]: any = await pool.query('SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE id = ?', [capitanId]);
+      if (!capRows || capRows.length === 0) throw new AppError('Capitán no encontrado en el sistema', 404);
+      capitanUser = capRows[0];
+    } else {
+      capitanUser = store.usuarios.find(u => u.id === capitanId);
+      if (!capitanUser) throw new AppError('Capitán no encontrado en el sistema', 404);
+    }
 
-    const playerList = data.players || (data as any).jugadores || [];
+    if (capitanUser.estado_cuenta === 'Suspendida') {
+      throw new AppError('Tu cuenta se encuentra suspendida temporalmente por acumulación de inasistencias o sanciones.', 403);
+    }
+
+    const capDni = capitanUser.dni ? String(capitanUser.dni).trim() : null;
+
+    // RF-16: Control de participación - El capitán no puede participar en más de un equipo dentro del mismo torneo
+    await this.validarNoParticipaEnTorneo(capitanId, torneoId, capitanUser.nombre, capDni || undefined);
+
+    const rawPlayerList: any[] = data.players || (data as any).jugadores || [];
 
     // Validaciones estrictas de DNI (7 u 8 dígitos numéricos, sin letras ni símbolos) y posición reglamentaria
     const DNI_REGEX = /^\d{7,8}$/;
     const posicionesValidas = getPosicionesValidas(torneo.deporte);
 
-    if (Array.isArray(playerList) && playerList.length > 0) {
-      for (let i = 0; i < playerList.length; i++) {
-        const p = playerList[i];
+    if (Array.isArray(rawPlayerList) && rawPlayerList.length > 0) {
+      for (let i = 0; i < rawPlayerList.length; i++) {
+        const p = rawPlayerList[i];
         const dni = String(p.dni || p.documento || '').trim();
         const pos = String(p.position || p.posicion || '').trim();
+        const nom = String(p.name || p.nombre || '').trim();
 
+        if (!nom) {
+          throw new AppError(`El nombre del jugador #${i + 1} es obligatorio`, 400);
+        }
         if (!dni) {
-          throw new AppError(`El DNI del jugador #${i + 1} (${p.name || p.nombre || 'Sin nombre'}) es obligatorio`, 400);
+          throw new AppError(`El DNI del jugador #${i + 1} (${nom}) es obligatorio`, 400);
         }
         if (!DNI_REGEX.test(dni)) {
           throw new AppError(
-            `El DNI '${dni}' del jugador #${i + 1} es inválido: debe contener exactamente 7 u 8 dígitos numéricos sin letras, espacios, puntos ni símbolos`,
+            `El DNI '${dni}' del jugador #${i + 1} (${nom}) es inválido: debe contener exactamente 7 u 8 dígitos numéricos sin letras, espacios, puntos ni símbolos`,
             400
           );
         }
-
         if (!pos) {
-          throw new AppError(`La posición del jugador #${i + 1} (${p.name || p.nombre || 'Sin nombre'}) es obligatoria`, 400);
+          throw new AppError(`La posición del jugador #${i + 1} (${nom}) es obligatoria`, 400);
         }
         const isPosValid = posicionesValidas.some(v => v.localeCompare(pos, undefined, { sensitivity: 'accent' }) === 0);
         if (!isPosValid) {
@@ -174,36 +226,191 @@ export class EquiposService {
           );
         }
       }
+
+      // Verificar que no haya DNIs duplicados en la nómina presentada
+      const dnisPresentados = rawPlayerList.map(p => String(p.dni || p.documento || '').trim());
+      if (new Set(dnisPresentados).size !== dnisPresentados.length) {
+        throw new AppError('Existen jugadores con números de DNI duplicados dentro del mismo plantel', 400);
+      }
+    }
+
+    // Identificar al capitán dentro de playerList para no duplicarlo en la nómina
+    const teammates: any[] = [];
+    if (Array.isArray(rawPlayerList)) {
+      for (const p of rawPlayerList) {
+        const pDni = String(p.dni || p.documento || '').trim();
+        const isCap = Boolean(
+          p.isCaptain ||
+          p.id === 'capitan-1' ||
+          (capDni && pDni === capDni) ||
+          p.id === capitanId ||
+          p.usuarioId === capitanId
+        );
+        if (!isCap) {
+          teammates.push(p);
+        }
+      }
+    }
+
+    // Verificar que ningún compañero repita el DNI del capitán
+    if (capDni && teammates.some(t => String(t.dni || t.documento || '').trim() === capDni)) {
+      throw new AppError('El DNI del capitán no puede repetirse en los miembros del plantel', 400);
+    }
+
+    // Verificar cupos reglamentarios del plantel por deporte (Capitán 1 + compañeros)
+    const totalSquad = 1 + teammates.length;
+    const minJug = torneo.min_jugadores_equipo || 5;
+    const maxJug = torneo.max_jugadores_equipo || 12;
+
+    if (totalSquad < minJug) {
+      throw new AppError(
+        `Plantel insuficiente: se requiere un mínimo de ${minJug} jugadores para ${torneo.deporte} (actualmente hay ${totalSquad}).`,
+        400
+      );
+    }
+    if (totalSquad > maxJug) {
+      throw new AppError(
+        `Límite de plantel superado: el máximo permitido para ${torneo.deporte} es de ${maxJug} jugadores (presentados: ${totalSquad}).`,
+        400
+      );
     }
 
     if (isDbConnected()) {
       const pool = getPool()!;
-      // Verificar nombre único en el torneo
-      const [existingName]: any = await pool.query('SELECT id FROM equipo WHERE fk_torneo_id = ? AND LOWER(nombre) = LOWER(?)', [torneoId, nombreEquipo]);
-      if (existingName && existingName.length > 0) {
-        throw new AppError('Ya existe un equipo con ese nombre en este torneo', 409);
+
+      // 1. Validar existencia y disponibilidad de cada compañero en MySQL antes de abrir transacción
+      const resolvedTeammates: Array<{ user: any; dni: string; position: string; dorsal?: number }> = [];
+      for (let i = 0; i < teammates.length; i++) {
+        const p = teammates[i];
+        const dni = String(p.dni || p.documento || '').trim();
+        const [uRows]: any = await pool.query(
+          'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE dni = ?',
+          [dni]
+        );
+        if (!uRows || uRows.length === 0) {
+          throw new AppError(
+            `El jugador "${p.name || p.nombre || 'Sin nombre'}" (DNI: ${dni}) no se encuentra registrado en el sistema. Todos los jugadores del plantel deben contar con una cuenta de usuario en la plataforma.`,
+            400
+          );
+        }
+        const playerUser = uRows[0];
+        if (playerUser.estado_cuenta === 'Suspendida') {
+          throw new AppError(
+            `El jugador "${playerUser.nombre}" (DNI: ${dni}) tiene su cuenta suspendida y no puede ser inscripto en el torneo.`,
+            400
+          );
+        }
+        // RF-16: Comprobar que no participe ya en otro equipo del mismo torneo
+        await this.validarNoParticipaEnTorneo(playerUser.id, torneoId, playerUser.nombre, dni);
+
+        resolvedTeammates.push({
+          user: playerUser,
+          dni,
+          position: String(p.position || p.posicion || '').trim(),
+          dorsal: p.dorsal ? Number(p.dorsal) : undefined,
+        });
       }
 
-      const [res]: any = await pool.query(
-        'INSERT INTO equipo (fk_torneo_id, fk_capitan_id, nombre, inscripcion_pagada) VALUES (?, ?, ?, true)',
-        [torneoId, capitanId, nombreEquipo]
-      );
-      const equipoId = res.insertId;
+      // 2. Ejecutar inserción en transacción MySQL atómica
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
 
-      // Registrar al capitán automáticamente en la nómina
-      await pool.query(
-        'INSERT INTO equipo_jugador (fk_equipo_id, fk_usuario_id, es_capitan, estado_invitacion, fecha_respuesta) VALUES (?, ?, true, "ACEPTADA", NOW())',
-        [equipoId, capitanId]
-      );
+        // Verificar nombre único en el torneo bajo bloqueo
+        const [existingName]: any = await connection.query(
+          'SELECT id FROM equipo WHERE fk_torneo_id = ? AND LOWER(nombre) = LOWER(?) FOR UPDATE',
+          [torneoId, nombreEquipo]
+        );
+        if (existingName && existingName.length > 0) {
+          throw new AppError('Ya existe un equipo con ese nombre en este torneo', 409);
+        }
 
-      await pool.query(
-        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "INSCRIBIR_EQUIPO", "equipo", ?, ?)',
-        [capitanId, equipoId, JSON.stringify({ torneoId, nombreEquipo, jugadoresCount: playerList.length })]
-      );
+        // Re-verificar cupo máximo bajo bloqueo
+        const [countRows]: any = await connection.query(
+          'SELECT COUNT(*) as cnt FROM equipo WHERE fk_torneo_id = ? FOR UPDATE',
+          [torneoId]
+        );
+        if (countRows[0].cnt >= torneo.max_equipos) {
+          throw new AppError(`El cupo máximo de equipos (${torneo.max_equipos}) ya fue alcanzado`, 400);
+        }
 
-      return this.getById(equipoId);
+        // Re-verificar RF-16 bajo bloqueo de transacción para prevenir carreras
+        await this.validarNoParticipaEnTorneoDb(connection, capitanId, torneoId, capitanUser.nombre, capDni || undefined);
+        for (const t of resolvedTeammates) {
+          await this.validarNoParticipaEnTorneoDb(connection, t.user.id, torneoId, t.user.nombre, t.dni);
+        }
+
+        // Insertar el equipo
+        const [res]: any = await connection.query(
+          'INSERT INTO equipo (fk_torneo_id, fk_capitan_id, nombre, inscripcion_pagada) VALUES (?, ?, ?, true)',
+          [torneoId, capitanId, nombreEquipo]
+        );
+        const equipoId = res.insertId;
+
+        // Registrar al capitán automáticamente en la nómina (dorsal 10 por defecto, capitán = true)
+        await connection.query(
+          'INSERT INTO equipo_jugador (fk_equipo_id, fk_usuario_id, dorsal, es_capitan, estado_invitacion, fecha_respuesta) VALUES (?, ?, 10, true, "ACEPTADA", NOW())',
+          [equipoId, capitanId]
+        );
+
+        // Registrar a todos los jugadores del plantel en equipo_jugador
+        for (let i = 0; i < resolvedTeammates.length; i++) {
+          const t = resolvedTeammates[i];
+          const defaultDorsal = (i + 1 === 10) ? 11 : (i + 1);
+          const dorsal = t.dorsal || defaultDorsal;
+          await connection.query(
+            'INSERT INTO equipo_jugador (fk_equipo_id, fk_usuario_id, dorsal, es_capitan, estado_invitacion, fecha_respuesta) VALUES (?, ?, ?, false, "ACEPTADA", NOW())',
+            [equipoId, t.user.id, dorsal]
+          );
+        }
+
+        // Auditoría
+        await connection.query(
+          'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "INSCRIBIR_EQUIPO", "equipo", ?, ?)',
+          [capitanId, equipoId, JSON.stringify({ torneoId, nombreEquipo, jugadoresCount: totalSquad })]
+        );
+
+        await connection.commit();
+        return this.getById(equipoId);
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
     } else {
-      const existingName = store.equipos.find(e => e.fk_torneo_id === torneoId && e.nombre.toLowerCase() === nombreEquipo.toLowerCase());
+      // 1. Validar existencia y disponibilidad de cada compañero en store
+      const resolvedTeammates: Array<{ user: any; dni: string; position: string; dorsal?: number }> = [];
+      for (let i = 0; i < teammates.length; i++) {
+        const p = teammates[i];
+        const dni = String(p.dni || p.documento || '').trim();
+        const playerUser = store.usuarios.find(u => u.dni && String(u.dni).trim() === dni);
+        if (!playerUser) {
+          throw new AppError(
+            `El jugador "${p.name || p.nombre || 'Sin nombre'}" (DNI: ${dni}) no se encuentra registrado en el sistema. Todos los jugadores del plantel deben contar con una cuenta de usuario en la plataforma.`,
+            400
+          );
+        }
+        if (playerUser.estado_cuenta === 'Suspendida') {
+          throw new AppError(
+            `El jugador "${playerUser.nombre}" (DNI: ${dni}) tiene su cuenta suspendida y no puede ser inscripto en el torneo.`,
+            400
+          );
+        }
+        // RF-16: Comprobar que no participe ya en otro equipo del mismo torneo
+        await this.validarNoParticipaEnTorneo(playerUser.id, torneoId, playerUser.nombre, dni);
+
+        resolvedTeammates.push({
+          user: playerUser,
+          dni,
+          position: String(p.position || p.posicion || '').trim(),
+          dorsal: p.dorsal ? Number(p.dorsal) : undefined,
+        });
+      }
+
+      const existingName = store.equipos.find(
+        e => e.fk_torneo_id === torneoId && e.nombre.toLowerCase() === nombreEquipo.toLowerCase()
+      );
       if (existingName) {
         throw new AppError('Ya existe un equipo con ese nombre en este torneo', 409);
       }
@@ -237,34 +444,31 @@ export class EquiposService {
         fecha_respuesta: new Date().toISOString(),
       });
 
-      // Si se proveyeron jugadores adicionales en la lista de buena fe
-      if (Array.isArray(playerList)) {
-        playerList.forEach((p: any, idx: number) => {
-          if (!p.isCaptain && (p.name || p.nombre)) {
-            const simulatedUserId = 1000 + newId * 10 + idx;
-            store.usuarios.push({
-              id: simulatedUserId,
-              nombre: p.name || p.nombre,
-              email: `${(p.name || p.nombre).toLowerCase().replace(/\s+/g, '.') || 'jugador'}@equipo.com`,
-              contrasena_hash: 'hash',
-              rol: 'Cliente',
-              inasistencias: 0,
-              estado_cuenta: 'Activa',
-              suspension_hasta: null,
-              created_at: new Date().toISOString(),
-            });
-            store.equipoJugadores.push({
-              fk_equipo_id: newId,
-              fk_usuario_id: simulatedUserId,
-              dorsal: idx + 1,
-              es_capitan: false,
-              estado_invitacion: 'ACEPTADA',
-              fecha_alta: new Date().toISOString(),
-              fecha_respuesta: new Date().toISOString(),
-            });
-          }
+      // Nómina completa de jugadores registrada
+      resolvedTeammates.forEach((t, idx) => {
+        const defaultDorsal = (idx + 1 === 10) ? 11 : (idx + 1);
+        const dorsal = t.dorsal || defaultDorsal;
+        store.equipoJugadores.push({
+          fk_equipo_id: newId,
+          fk_usuario_id: t.user.id,
+          dorsal,
+          es_capitan: false,
+          estado_invitacion: 'ACEPTADA',
+          fecha_alta: new Date().toISOString(),
+          fecha_respuesta: new Date().toISOString(),
         });
-      }
+      });
+
+      store.auditLogs.push({
+        id: store.auditLogs.length + 1,
+        fk_usuario_id: capitanId,
+        accion: 'INSCRIBIR_EQUIPO',
+        entidad_afectada: 'equipo',
+        entidad_id: newId,
+        detalles: JSON.stringify({ torneoId, nombreEquipo, jugadoresCount: totalSquad }),
+        ip_address: '127.0.0.1',
+        created_at: new Date().toISOString(),
+      });
 
       return this.getById(newId);
     }
@@ -482,7 +686,8 @@ export class EquiposService {
   /**
    * RF-16: Control de participación: Un jugador no puede estar en dos equipos del mismo torneo
    */
-  private async validarNoParticipaEnTorneo(usuarioId: number, torneoId: number) {
+  async validarNoParticipaEnTorneo(usuarioId: number, torneoId: number, nombre?: string, dni?: string) {
+    const ident = nombre ? (dni ? `"${nombre}" (DNI: ${dni})` : `"${nombre}"`) : 'El jugador';
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
@@ -494,7 +699,7 @@ export class EquiposService {
       );
       if (rows && rows.length > 0) {
         throw new AppError(
-          `El jugador ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por torneo.`,
+          `El jugador ${ident} ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por certamen.`,
           409
         );
       }
@@ -507,10 +712,28 @@ export class EquiposService {
       if (part) {
         const eq = store.equipos.find(e => e.id === part.fk_equipo_id);
         throw new AppError(
-          `El jugador ya se encuentra inscripto en el equipo '${eq?.nombre}' dentro de este torneo.`,
+          `El jugador ${ident} ya se encuentra inscripto en el equipo '${eq?.nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por certamen.`,
           409
         );
       }
+    }
+  }
+
+  private async validarNoParticipaEnTorneoDb(conn: any, usuarioId: number, torneoId: number, nombre?: string, dni?: string) {
+    const ident = nombre ? (dni ? `"${nombre}" (DNI: ${dni})` : `"${nombre}"`) : 'El jugador';
+    const [rows]: any = await conn.query(
+      `SELECT e.nombre as equipo_nombre
+       FROM equipo_jugador ej
+       JOIN equipo e ON ej.fk_equipo_id = e.id
+       WHERE ej.fk_usuario_id = ? AND e.fk_torneo_id = ? AND ej.estado_invitacion = 'ACEPTADA'
+       FOR UPDATE`,
+      [usuarioId, torneoId]
+    );
+    if (rows && rows.length > 0) {
+      throw new AppError(
+        `El jugador ${ident} ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por certamen.`,
+        409
+      );
     }
   }
 }

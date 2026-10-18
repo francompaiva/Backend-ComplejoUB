@@ -323,10 +323,10 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       nombreEquipo: `Equipo Historial Test ${Date.now()}`,
       players: [
         { name: 'Lucas Diaz', dni: '40123456', position: 'Delantero' },
-        { name: 'Jugador 2', dni: '41123456', position: 'Defensor' },
-        { name: 'Jugador 3', dni: '42123456', position: 'Mediocampista' },
-        { name: 'Jugador 4', dni: '43123456', position: 'Defensor' },
-        { name: 'Jugador 5', dni: '44123456', position: 'Arquero' }
+        { name: 'Juan Paiva', dni: '42110339', position: 'Defensor' },
+        { name: 'Diego Lopez', dni: '40887652', position: 'Mediocampista' },
+        { name: 'Gonzalo Higuain', dni: '38109223', position: 'Delantero' },
+        { name: 'Julian Alvarez', dni: '41554912', position: 'Delantero' }
       ]
     });
 
@@ -346,6 +346,128 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     const found = misEquipos.find((m: any) => m.equipo_id === eq.id || m.equipo_nombre === eq.nombre);
     assert.ok(found, 'El equipo aceptado debe figurar en el historial de equipos y torneos del usuario');
     assert.equal(found.estado_invitacion, 'ACEPTADA');
+  });
+
+  it('BUG-003: Persistencia completa de todos los jugadores de la nómina al inscribir equipo', async () => {
+    // Torneo 2: Torneo Apertura Pádel Parejas (min 2, max 4)
+    // Capitán: usuario 10 (Enzo Fernández, DNI 42991442)
+    // Compañero: usuario 11 (Rodrigo De Paul, DNI 39001992)
+    const eq = await equiposService.inscribirEquipo(10, {
+      torneoId: 2,
+      nombreEquipo: `Pareja Padel Test ${Date.now()}`,
+      players: [
+        { name: 'Enzo Fernandez', dni: '42991442', position: 'Drive' },
+        { name: 'Rodrigo De Paul', dni: '39001992', position: 'Revés' }
+      ]
+    });
+
+    assert.ok(eq.id, 'El equipo debe haber sido creado con ID');
+    assert.equal(eq.jugadores.length, 2, 'La nómina debe persistir exactamente los 2 jugadores presentados');
+
+    const capitanPersistido = eq.jugadores.find((j: any) => j.fk_usuario_id === 10);
+    assert.ok(capitanPersistido, 'El capitán debe estar en la nómina');
+    assert.equal(capitanPersistido.es_capitan, true, 'El capitán debe tener bandera es_capitan = true');
+
+    const companeroPersistido = eq.jugadores.find((j: any) => j.fk_usuario_id === 11);
+    assert.ok(companeroPersistido, 'El compañero debe estar en la nómina');
+    assert.equal(companeroPersistido.es_capitan, false, 'El compañero no debe tener bandera es_capitan');
+  });
+
+  it('Validación de Jugadores No Registrados: Inscribir un DNI no registrado debe ser rechazado', async () => {
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(6, { // Juan Paiva (no está inscripto en Torneo 2)
+          torneoId: 2,
+          nombreEquipo: `Pareja No Registrada ${Date.now()}`,
+          players: [
+            { name: 'Juan Paiva', dni: '42110339', position: 'Drive' },
+            { name: 'Fantasma Desconocido', dni: '99887766', position: 'Revés' }
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('no se encuentra registrado');
+      }
+    );
+  });
+
+  it('RF-16: Impedir que un jugador participe en dos equipos dentro del mismo torneo', async () => {
+    // En el test anterior de Pádel (Torneo 2), Rodrigo De Paul (id 11, DNI 39001992) ya quedó inscripto.
+    // Si otro capitán intenta inscribirlo en un segundo equipo en el mismo Torneo 2:
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(8, { // Gonzalo Higuain (capitán)
+          torneoId: 2,
+          nombreEquipo: `Segundo Equipo Padel ${Date.now()}`,
+          players: [
+            { name: 'Gonzalo Higuain', dni: '38109223', position: 'Drive' },
+            { name: 'Rodrigo De Paul', dni: '39001992', position: 'Revés' } // Ya está en Torneo 2
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 409 && err.message.includes('ya se encuentra inscripto');
+      }
+    );
+  });
+
+  it('Participación Multi-Torneo: Un jugador sí puede participar en equipos de torneos diferentes', async () => {
+    // Rodrigo De Paul (id 11) y Enzo Fernández (id 10) ya están en Torneo 2 (Padel).
+    // Ahora participan en Torneo 3 (Copa Clausura Fútbol 5) con Sebastian Norjean como capitán:
+    const eqMulti = await equiposService.inscribirEquipo(2, {
+      torneoId: 3,
+      nombreEquipo: `Equipo Multi-Torneo ${Date.now()}`,
+      players: [
+        { name: 'Sebastian Norjean', dni: '32333444', position: 'Defensor' },
+        { name: 'Rodrigo De Paul', dni: '39001992', position: 'Mediocampista' },
+        { name: 'Enzo Fernandez', dni: '42991442', position: 'Delantero' },
+        { name: 'Marcos Perez', dni: '33444555', position: 'Defensor' },
+        { name: 'Administrador General', dni: '30111222', position: 'Arquero' }
+      ]
+    });
+
+    assert.ok(eqMulti.id, 'Debe permitir la inscripción de un mismo jugador en un certamen diferente');
+    const dePaulMulti = eqMulti.jugadores.find((j: any) => j.fk_usuario_id === 11);
+    assert.ok(dePaulMulti, 'El jugador debe estar presente en la nómina del segundo certamen');
+    const enzoMulti = eqMulti.jugadores.find((j: any) => j.fk_usuario_id === 10);
+    assert.ok(enzoMulti, 'Ambos jugadores de Pádel deben estar inscriptos con éxito en Fútbol 5');
+    assert.ok(dePaulMulti, 'El jugador debe estar presente en la nómina del segundo certamen');
+  });
+
+  it('Validación de Plantel: DNI duplicado dentro del mismo equipo debe ser rechazado', async () => {
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(8, {
+          torneoId: 2,
+          nombreEquipo: `Equipo DNI Repetido ${Date.now()}`,
+          players: [
+            { name: 'Gonzalo Higuain', dni: '38109223', position: 'Drive' },
+            { name: 'Gonzalo Clon', dni: '38109223', position: 'Revés' } // Mismo DNI
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('duplicados');
+      }
+    );
+  });
+
+  it('Validación de Cupos Reglamentarios: Mínimo de jugadores por deporte debe ser respetado', async () => {
+    // Pádel requiere mínimo 2 jugadores. Enviar 1 solo jugador:
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(8, {
+          torneoId: 2,
+          nombreEquipo: `Padel Sin Pareja ${Date.now()}`,
+          players: [
+            { name: 'Gonzalo Higuain', dni: '38109223', position: 'Drive' }
+          ]
+        });
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('mínimo');
+      }
+    );
   });
 });
 
