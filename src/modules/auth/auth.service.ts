@@ -20,12 +20,21 @@ export interface LoginDTO {
   contrasena: string;
 }
 
+const otpRequestTimestamps = new Map<string, number>();
+const otpVerificationAttempts = new Map<string, number>();
+
 export class AuthService {
   private async notificarCodigoOtp(email: string, nombre: string, codigo: string) {
     try {
-      await emailService.enviarCodigoVerificacion(email, nombre, codigo);
+      return await emailService.enviarCodigoVerificacion(email, nombre, codigo);
     } catch (err: any) {
       console.warn(`[authService] Advertencia al despachar código OTP a ${email}: ${err?.message}`);
+      return {
+        success: false,
+        delivered: false,
+        isSandbox: false,
+        message: err?.message || 'Error al despachar correo',
+      };
     }
   }
 
@@ -62,12 +71,24 @@ export class AuthService {
       throw new AppError('La contraseña debe tener al menos 6 caracteres', 400);
     }
 
+    // Rate limiting: máximo 1 solicitud cada 60 segundos por correo
+    const lastRequest = otpRequestTimestamps.get(emailTrimmed);
+    const now = Date.now();
+    if (lastRequest && (now - lastRequest) < 60000) {
+      const waitSecs = Math.ceil((60000 - (now - lastRequest)) / 1000);
+      throw new AppError(`Debes esperar ${waitSecs} segundos antes de solicitar otro código de verificación.`, 429);
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(contrasena, salt);
 
     // Generar código OTP de 6 dígitos con expiración de 15 minutos
     const codigo = Math.floor(100000 + Math.random() * 900000).toString();
     const expiracion = new Date(Date.now() + 15 * 60 * 1000);
+
+    // Registrar timestamp de solicitud y reiniciar intentos fallidos
+    otpRequestTimestamps.set(emailTrimmed, now);
+    otpVerificationAttempts.set(emailTrimmed, 0);
 
     if (isDbConnected()) {
       const pool = getPool()!;
@@ -92,11 +113,17 @@ export class AuthService {
             'UPDATE usuario SET nombre = ?, contrasena_hash = ?, dni = ?, telefono = ?, codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
             [nombre, hash, dni, telefono || null, codigo, expiracion, existing[0].id]
           );
-          await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
+          const emailRes = await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
-            message: 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.',
+            emailDelivered: emailRes.delivered,
+            isSandbox: emailRes.isSandbox,
+            message: emailRes.delivered
+              ? 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.'
+              : (emailRes.isSandbox
+                  ? 'Registro actualizado (Modo Pruebas): Se generó tu código de activación.'
+                  : 'Registro actualizado, pero el servidor SMTP no pudo entregar el correo en tu casilla.'),
           };
         }
         throw new AppError('El correo electrónico ya se encuentra registrado y activo', 409);
@@ -108,12 +135,18 @@ export class AuthService {
         [nombre, emailTrimmed, hash, dni, rol, telefono || null, codigo, expiracion]
       );
 
-      await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
+      const emailRes = await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
 
       return {
         requiresVerification: true,
         email: emailTrimmed,
-        message: 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.',
+        emailDelivered: emailRes.delivered,
+        isSandbox: emailRes.isSandbox,
+        message: emailRes.delivered
+          ? 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.'
+          : (emailRes.isSandbox
+              ? 'Registro iniciado (Modo Pruebas): Se generó tu código de verificación.'
+              : 'Registro iniciado, pero el servidor SMTP no pudo entregar el correo en tu casilla.'),
       };
     } else {
       // Validar unicidad de DNI en memoria
@@ -131,11 +164,17 @@ export class AuthService {
           if (telefono) existing.telefono = telefono;
           existing.codigo_verificacion = codigo;
           existing.codigo_expiracion = expiracion.toISOString();
-          await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
+          const emailRes = await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
-            message: 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.',
+            emailDelivered: emailRes.delivered,
+            isSandbox: emailRes.isSandbox,
+            message: emailRes.delivered
+              ? 'Registro actualizado. Te enviamos un nuevo código de activación de 6 dígitos a tu casilla de correo.'
+              : (emailRes.isSandbox
+                  ? 'Registro actualizado (Modo Pruebas): Se generó tu código de activación.'
+                  : 'Registro actualizado, pero el servidor SMTP no pudo entregar el correo en tu casilla.'),
           };
         }
         throw new AppError('El correo electrónico ya se encuentra registrado', 409);
@@ -160,12 +199,18 @@ export class AuthService {
       };
       store.usuarios.push(newUser);
 
-      await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
+      const emailRes = await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
 
       return {
         requiresVerification: true,
         email: emailTrimmed,
-        message: 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.',
+        emailDelivered: emailRes.delivered,
+        isSandbox: emailRes.isSandbox,
+        message: emailRes.delivered
+          ? 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.'
+          : (emailRes.isSandbox
+              ? 'Registro iniciado (Modo Pruebas): Se generó tu código de verificación.'
+              : 'Registro iniciado, pero el servidor SMTP no pudo entregar el correo en tu casilla.'),
       };
     }
   }
@@ -178,6 +223,12 @@ export class AuthService {
     const emailTrimmed = email.trim().toLowerCase();
     const codigoTrimmed = codigo.trim();
 
+    // Límite de 5 intentos fallidos por código
+    const currentAttempts = otpVerificationAttempts.get(emailTrimmed) || 0;
+    if (currentAttempts >= 5) {
+      throw new AppError('Has superado el límite máximo de 5 intentos fallidos. Solicita un nuevo código de verificación.', 429);
+    }
+
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query('SELECT * FROM usuario WHERE email = ?', [emailTrimmed]);
@@ -187,6 +238,8 @@ export class AuthService {
       const user = rows[0];
 
       if (user.email_verificado) {
+        otpVerificationAttempts.delete(emailTrimmed);
+        otpRequestTimestamps.delete(emailTrimmed);
         const token = this.generateToken(user.id, user.email, user.rol);
         return { user, token, message: 'La cuenta ya se encuentra verificada.' };
       }
@@ -198,13 +251,22 @@ export class AuthService {
       const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
 
       if (!isMasterCode && (!isCodeValid || isExpired)) {
-        throw new AppError('Código de verificación inválido o expirado', 400);
+        const nextAttempts = currentAttempts + 1;
+        otpVerificationAttempts.set(emailTrimmed, nextAttempts);
+        const remaining = Math.max(0, 5 - nextAttempts);
+        if (nextAttempts >= 5) {
+          throw new AppError('Has superado el límite máximo de 5 intentos fallidos. Solicita un nuevo código de verificación.', 429);
+        }
+        throw new AppError(`Código de verificación inválido o expirado. Te quedan ${remaining} intento(s).`, 400);
       }
 
       await pool.query(
         'UPDATE usuario SET email_verificado = true, codigo_verificacion = NULL, codigo_expiracion = NULL WHERE id = ?',
         [user.id]
       );
+
+      otpVerificationAttempts.delete(emailTrimmed);
+      otpRequestTimestamps.delete(emailTrimmed);
 
       const token = this.generateToken(user.id, user.email, user.rol);
       return {
@@ -225,6 +287,8 @@ export class AuthService {
       if (!user) throw new AppError('Usuario no encontrado', 404);
 
       if (user.email_verificado) {
+        otpVerificationAttempts.delete(emailTrimmed);
+        otpRequestTimestamps.delete(emailTrimmed);
         const token = this.generateToken(user.id, user.email, user.rol);
         return { user, token, message: 'La cuenta ya se encuentra verificada.' };
       }
@@ -235,12 +299,21 @@ export class AuthService {
       const isExpired = user.codigo_expiracion && new Date(user.codigo_expiracion) < new Date();
 
       if (!isMasterCode && (!isCodeValid || isExpired)) {
-        throw new AppError('Código de verificación inválido o expirado', 400);
+        const nextAttempts = currentAttempts + 1;
+        otpVerificationAttempts.set(emailTrimmed, nextAttempts);
+        const remaining = Math.max(0, 5 - nextAttempts);
+        if (nextAttempts >= 5) {
+          throw new AppError('Has superado el límite máximo de 5 intentos fallidos. Solicita un nuevo código de verificación.', 429);
+        }
+        throw new AppError(`Código de verificación inválido o expirado. Te quedan ${remaining} intento(s).`, 400);
       }
 
       user.email_verificado = true;
       user.codigo_verificacion = null;
       user.codigo_expiracion = null;
+
+      otpVerificationAttempts.delete(emailTrimmed);
+      otpRequestTimestamps.delete(emailTrimmed);
 
       const token = this.generateToken(user.id, user.email, user.rol);
       const { contrasena_hash, ...safeUser } = user;
@@ -255,8 +328,20 @@ export class AuthService {
   async reenviarCodigo(email: string) {
     if (!email) throw new AppError('El email es obligatorio', 400);
     const emailTrimmed = email.trim().toLowerCase();
+
+    // Rate limiting: máximo 1 solicitud cada 60 segundos por correo
+    const lastRequest = otpRequestTimestamps.get(emailTrimmed);
+    const now = Date.now();
+    if (lastRequest && (now - lastRequest) < 60000) {
+      const waitSecs = Math.ceil((60000 - (now - lastRequest)) / 1000);
+      throw new AppError(`Debes esperar ${waitSecs} segundos antes de solicitar otro código de verificación.`, 429);
+    }
+
     const codigo = Math.floor(100000 + Math.random() * 900000).toString();
     const expiracion = new Date(Date.now() + 15 * 60 * 1000);
+
+    otpRequestTimestamps.set(emailTrimmed, now);
+    otpVerificationAttempts.set(emailTrimmed, 0);
 
     if (isDbConnected()) {
       const pool = getPool()!;
@@ -269,8 +354,17 @@ export class AuthService {
         [codigo, expiracion, user.id]
       );
 
-      await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
-      return { success: true, message: 'Código reenviado con éxito.' };
+      const emailRes = await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
+      return {
+        success: true,
+        emailDelivered: emailRes.delivered,
+        isSandbox: emailRes.isSandbox,
+        message: emailRes.delivered
+          ? 'Nuevo código enviado exitosamente a tu correo.'
+          : (emailRes.isSandbox
+              ? 'Nuevo código generado (Modo Pruebas).'
+              : 'Nuevo código generado, pero el servidor SMTP no pudo entregar el correo.'),
+      };
     } else {
       const user = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
       if (!user) throw new AppError('Usuario no encontrado', 404);
@@ -278,8 +372,17 @@ export class AuthService {
       user.codigo_verificacion = codigo;
       user.codigo_expiracion = expiracion.toISOString();
 
-      await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
-      return { success: true, message: 'Código reenviado con éxito.' };
+      const emailRes = await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
+      return {
+        success: true,
+        emailDelivered: emailRes.delivered,
+        isSandbox: emailRes.isSandbox,
+        message: emailRes.delivered
+          ? 'Nuevo código enviado exitosamente a tu correo.'
+          : (emailRes.isSandbox
+              ? 'Nuevo código generado (Modo Pruebas).'
+              : 'Nuevo código generado, pero el servidor SMTP no pudo entregar el correo.'),
+      };
     }
   }
 

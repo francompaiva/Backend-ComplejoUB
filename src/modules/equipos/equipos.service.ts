@@ -173,12 +173,16 @@ export class EquiposService {
     let capitanUser: any = null;
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [capRows]: any = await pool.query('SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE id = ?', [capitanId]);
+      const [capRows]: any = await pool.query('SELECT id, nombre, email, dni, rol, estado_cuenta FROM usuario WHERE id = ?', [capitanId]);
       if (!capRows || capRows.length === 0) throw new AppError('Capitán no encontrado en el sistema', 404);
       capitanUser = capRows[0];
     } else {
       capitanUser = store.usuarios.find(u => u.id === capitanId);
       if (!capitanUser) throw new AppError('Capitán no encontrado en el sistema', 404);
+    }
+
+    if (capitanUser.rol === 'Arbitro') {
+      throw new AppError('Un usuario con rol Árbitro no puede inscribir equipos ni participar en torneos', 403);
     }
 
     if (capitanUser.estado_cuenta === 'Suspendida') {
@@ -227,7 +231,7 @@ export class EquiposService {
         if (isDbConnected()) {
           const pool = getPool()!;
           const [uRows]: any = await pool.query(
-            'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+            'SELECT id, nombre, email, dni, rol, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
             [dni]
           );
           if (uRows && uRows.length > 0) regUser = uRows[0];
@@ -239,6 +243,13 @@ export class EquiposService {
           throw new AppError(
             `El jugador con DNI '${dni}' no se encuentra registrado en el sistema. Todos los integrantes del plantel deben poseer una cuenta activa previamente en Complejo Deportivo UB para poder ser inscriptos.`,
             400
+          );
+        }
+
+        if (regUser.rol === 'Arbitro') {
+          throw new AppError(
+            `El usuario ${regUser.nombre} (DNI ${dni}) posee rol Árbitro y no puede participar como jugador de torneos`,
+            403
           );
         }
 
@@ -312,7 +323,7 @@ export class EquiposService {
         const p = teammates[i];
         const dni = String(p.dni || p.documento || '').replace(/\D/g, '').trim();
         const [uRows]: any = await pool.query(
-          'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+          'SELECT id, nombre, email, dni, rol, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
           [dni]
         );
         if (!uRows || uRows.length === 0) {
@@ -322,6 +333,12 @@ export class EquiposService {
           );
         }
         const playerUser = uRows[0];
+        if (playerUser.rol === 'Arbitro') {
+          throw new AppError(
+            `El usuario ${playerUser.nombre} (DNI ${dni}) posee rol Árbitro y no puede participar como jugador de torneos`,
+            403
+          );
+        }
         if (playerUser.estado_cuenta === 'Suspendida') {
           throw new AppError(
             `El jugador "${playerUser.nombre}" (DNI: ${dni}) tiene su cuenta suspendida y no puede ser inscripto en el torneo.`,
@@ -522,12 +539,16 @@ export class EquiposService {
     let invitedUser: any = null;
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [uRows]: any = await pool.query('SELECT id, nombre, email FROM usuario WHERE email = ?', [emailUsuario]);
+      const [uRows]: any = await pool.query('SELECT id, nombre, email, rol FROM usuario WHERE email = ?', [emailUsuario]);
       if (!uRows || uRows.length === 0) throw new AppError(`No se encontró ningún usuario con el correo ${emailUsuario}`, 404);
       invitedUser = uRows[0];
     } else {
       invitedUser = store.usuarios.find(u => u.email.toLowerCase() === emailUsuario.toLowerCase());
       if (!invitedUser) throw new AppError(`No se encontró ningún usuario con el correo ${emailUsuario}`, 404);
+    }
+
+    if (invitedUser.rol === 'Arbitro') {
+      throw new AppError('Un usuario con rol Árbitro no puede ser invitado ni formar parte de un equipo en torneos', 403);
     }
 
     // RF-16: Verificar que no esté en otro equipo del mismo torneo
@@ -679,6 +700,11 @@ export class EquiposService {
 
     if (isDbConnected()) {
       const pool = getPool()!;
+      const [uRows]: any = await pool.query('SELECT rol FROM usuario WHERE id = ?', [usuarioId]);
+      if (uRows && uRows.length > 0 && uRows[0].rol === 'Arbitro') {
+        throw new AppError('Un usuario con rol Árbitro no puede participar en torneos', 403);
+      }
+
       const [rows]: any = await pool.query('SELECT * FROM equipo_jugador WHERE fk_equipo_id = ? AND fk_usuario_id = ?', [equipoId, usuarioId]);
       if (!rows || rows.length === 0) throw new AppError('Invitación no encontrada', 404);
 
@@ -694,6 +720,11 @@ export class EquiposService {
         [cleanRespuesta, equipoId, usuarioId]
       );
     } else {
+      const userObj = store.usuarios.find(u => u.id === usuarioId);
+      if (userObj && userObj.rol === 'Arbitro') {
+        throw new AppError('Un usuario con rol Árbitro no puede participar en torneos', 403);
+      }
+
       const item = store.equipoJugadores.find(ej => ej.fk_equipo_id === equipoId && ej.fk_usuario_id === usuarioId);
       if (!item) throw new AppError('Invitación no encontrada', 404);
 
@@ -777,7 +808,7 @@ export class EquiposService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+        'SELECT id, nombre, email, dni, rol, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
         [cleanDni]
       );
       if (!rows || rows.length === 0) {
@@ -788,6 +819,7 @@ export class EquiposService {
         id: u.id,
         nombre: u.nombre,
         dni: u.dni,
+        rol: u.rol,
         estado_cuenta: u.estado_cuenta,
       };
     } else {
@@ -799,6 +831,7 @@ export class EquiposService {
         id: u.id,
         nombre: u.nombre,
         dni: u.dni,
+        rol: u.rol,
         estado_cuenta: u.estado_cuenta,
       };
     }

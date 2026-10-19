@@ -4,6 +4,7 @@ import { ReservasService } from '../modules/reservas/reservas.service.js';
 import { TorneosService } from '../modules/torneos/torneos.service.js';
 import { AuthService } from '../modules/auth/auth.service.js';
 import { EquiposService } from '../modules/equipos/equipos.service.js';
+import { AdminService } from '../modules/admin/admin.service.js';
 import { store } from '../config/in-memory-store.js';
 
 describe('Reglas de Negocio - Complejo Deportivo UB', () => {
@@ -11,6 +12,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
   const torneosService = new TorneosService();
   const authService = new AuthService();
   const equiposService = new EquiposService();
+  const adminService = new AdminService();
 
   it('RF-03: Cálculo exacto de seña del 30% al reservar', async () => {
     // Cancha 1 (Fútbol 5) cuesta $18.000 -> la seña del 30% debe ser $5.400
@@ -415,16 +417,23 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
 
   it('Participación Multi-Torneo: Un jugador sí puede participar en equipos de torneos diferentes', async () => {
     // Rodrigo De Paul (id 11) y Enzo Fernández (id 10) ya están en Torneo 2 (Padel).
-    // Ahora participan en Torneo 3 (Copa Clausura Fútbol 5) con Sebastian Norjean como capitán:
-    const eqMulti = await equiposService.inscribirEquipo(2, {
-      torneoId: 3,
+    // Ahora participan en un segundo torneo con Enzo Fernandez (id 10) como capitán:
+    const tNuevo = await torneosService.create({
+      nombre: `Torneo Multi-Certamen ${Date.now()}`,
+      deporte: 'Padel',
+      costo_inscripcion: 10000,
+      valor_partido: 3000,
+      max_equipos: 8,
+      min_jugadores_equipo: 2,
+      max_jugadores_equipo: 4
+    });
+
+    const eqMulti = await equiposService.inscribirEquipo(10, {
+      torneoId: tNuevo.id,
       nombreEquipo: `Equipo Multi-Torneo ${Date.now()}`,
       players: [
-        { name: 'Sebastian Norjean', dni: '32333444', position: 'Defensor' },
-        { name: 'Rodrigo De Paul', dni: '39001992', position: 'Mediocampista' },
-        { name: 'Enzo Fernandez', dni: '42991442', position: 'Delantero' },
-        { name: 'Marcos Perez', dni: '33444555', position: 'Defensor' },
-        { name: 'Administrador General', dni: '30111222', position: 'Arquero' }
+        { name: 'Enzo Fernandez', dni: '42991442', position: 'Drive' },
+        { name: 'Rodrigo De Paul', dni: '39001992', position: 'Revés' }
       ]
     });
 
@@ -432,8 +441,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     const dePaulMulti = eqMulti.jugadores.find((j: any) => j.fk_usuario_id === 11);
     assert.ok(dePaulMulti, 'El jugador debe estar presente en la nómina del segundo certamen');
     const enzoMulti = eqMulti.jugadores.find((j: any) => j.fk_usuario_id === 10);
-    assert.ok(enzoMulti, 'Ambos jugadores de Pádel deben estar inscriptos con éxito en Fútbol 5');
-    assert.ok(dePaulMulti, 'El jugador debe estar presente en la nómina del segundo certamen');
+    assert.ok(enzoMulti, 'Ambos jugadores de Pádel deben estar inscriptos con éxito en un segundo certamen');
   });
 
   it('Validación de Plantel: DNI duplicado dentro del mismo equipo debe ser rechazado', async () => {
@@ -605,6 +613,196 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
         await authService.actualizarDni(6, '40123456');
       },
       (err: any) => err.statusCode === 409 && err.message.includes('ya se encuentra registrado')
+    );
+  });
+
+  it('Permisos: Árbitro bloqueado de inscribir un equipo como capitán (HTTP 403 Forbidden)', async () => {
+    // Usuario ID 2 (Sebastian Norjean) es Arbitro
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(2, {
+          torneoId: 3,
+          nombreEquipo: 'Equipo Arbitro Prohibido',
+          players: [
+            { name: 'Sebastian Norjean', dni: '32333444', position: 'Defensor' },
+            { name: 'Mateo Fernandez', dni: '41229400', position: 'Arquero' },
+            { name: 'Juan Paiva', dni: '41998822', position: 'Delantero' },
+            { name: 'Diego Lopez', dni: '39112233', position: 'Defensor' },
+            { name: 'Gonzalo Higuain', dni: '38109223', position: 'Delantero' }
+          ]
+        });
+      },
+      (err: any) => err.statusCode === 403 && err.message.includes('Árbitro')
+    );
+  });
+
+  it('Permisos: Árbitro bloqueado de ser incluido en el plantel por otro capitán (HTTP 403 Forbidden)', async () => {
+    // Crear certamen nuevo con inscripciones abiertas
+    const tArbitroTest = await torneosService.create({
+      nombre: `Torneo Test Arbitro ${Date.now()}`,
+      deporte: 'Futbol 5',
+      costo_inscripcion: 15000,
+      valor_partido: 4000,
+      max_equipos: 8,
+      min_jugadores_equipo: 5,
+      max_jugadores_equipo: 12
+    });
+
+    // Usuario ID 4 (Lucas Diaz, Cliente) intenta anotar al Árbitro Marcos Perez (DNI 33444555)
+    await assert.rejects(
+      async () => {
+        await equiposService.inscribirEquipo(4, {
+          torneoId: tArbitroTest.id,
+          nombreEquipo: 'Equipo Con Arbitro Prohibido',
+          players: [
+            { name: 'Lucas Diaz', dni: '40123456', position: 'Delantero' },
+            { name: 'Marcos Perez', dni: '33444555', position: 'Defensor' }, // Arbitro
+            { name: 'Juan Paiva', dni: '41998822', position: 'Delantero' },
+            { name: 'Diego Lopez', dni: '39112233', position: 'Defensor' },
+            { name: 'Mateo Fernandez', dni: '41229400', position: 'Arquero' }
+          ]
+        });
+      },
+      (err: any) => err.statusCode === 403 && err.message.includes('rol Árbitro')
+    );
+  });
+
+  it('Permisos: Árbitro bloqueado de recibir o aceptar invitaciones a torneos (HTTP 403 Forbidden)', async () => {
+    // Intentar invitar a un árbitro (mperez@complejoub.com) a un equipo existente (Equipo 1, capitán Lucas Díaz id 4)
+    await assert.rejects(
+      async () => {
+        await equiposService.invitarJugador(1, 4, { emailUsuario: 'mperez@complejoub.com' });
+      },
+      (err: any) => err.statusCode === 403 && err.message.includes('rol Árbitro')
+    );
+
+    // Intentar que un árbitro responda una invitación
+    await assert.rejects(
+      async () => {
+        await equiposService.responderInvitacion(1, 2, 'ACEPTADA');
+      },
+      (err: any) => err.statusCode === 403 && err.message.includes('rol Árbitro')
+    );
+  });
+
+  it('Superadministrador: Alta de Administrador y Árbitro con validación y persistencia de DNI', async () => {
+    // Crear un nuevo Administrador con DNI válido de 8 dígitos
+    const adminCreated = await adminService.crearAdministrador(
+      {
+        nombre: 'Admin Auditoria Test',
+        email: 'admin.test@complejoub.com',
+        contrasena: 'AdminPass123!',
+        dni: '38999111',
+        rol: 'Administrador',
+        telefono: '+54 11 4444-2222'
+      },
+      1 // Creado por Superadmin
+    );
+    assert.equal(adminCreated.nombre, 'Admin Auditoria Test');
+    assert.equal(adminCreated.dni, '38999111');
+    assert.equal(adminCreated.rol, 'Administrador');
+    assert.equal(adminCreated.email_verificado, true);
+
+    // Crear un nuevo Árbitro con DNI válido de 8 dígitos
+    const arbitroCreated = await adminService.crearAdministrador(
+      {
+        nombre: 'Carlos Lunati (Árbitro)',
+        email: 'lunati.ref@complejoub.com',
+        contrasena: 'ArbitroPass123!',
+        dni: '27888999',
+        rol: 'Arbitro'
+      },
+      1
+    );
+    assert.equal(arbitroCreated.rol, 'Arbitro');
+    assert.equal(arbitroCreated.dni, '27888999');
+    assert.equal(arbitroCreated.email_verificado, true);
+
+    // Verificar que figuren en la lista de administradores/árbitros
+    const list = await adminService.getAdministradores();
+    assert.ok(list.some((u: any) => u.dni === '38999111'));
+    assert.ok(list.some((u: any) => u.dni === '27888999'));
+
+    // Rechazar alta con DNI duplicado (409 Conflict)
+    await assert.rejects(
+      async () => {
+        await adminService.crearAdministrador(
+          {
+            nombre: 'Clon DNI',
+            email: 'clon@complejoub.com',
+            contrasena: 'ClonPass123!',
+            dni: '38999111',
+            rol: 'Administrador'
+          },
+          1
+        );
+      },
+      (err: any) => err.statusCode === 409 && err.message.includes('ya se encuentra registrado')
+    );
+
+    // Rechazar alta con DNI inválido (400)
+    await assert.rejects(
+      async () => {
+        await adminService.crearAdministrador(
+          {
+            nombre: 'Dni Corto',
+            email: 'corto@complejoub.com',
+            contrasena: 'Pass123!',
+            dni: '12345',
+            rol: 'Arbitro'
+          },
+          1
+        );
+      },
+      (err: any) => err.statusCode === 400 && err.message.includes('7 u 8 dígitos')
+    );
+  });
+
+  it('OTP Seguridad: Límite máximo de 5 intentos fallidos de verificación (HTTP 429)', async () => {
+    const testEmail = `otp.attempts.${Date.now()}@test.com`;
+    // Registrar usuario para generar OTP
+    await authService.register({
+      nombre: 'Usuario Intentos OTP',
+      email: testEmail,
+      contrasena: 'PassSecure123!',
+      dni: '36777888'
+    });
+
+    // 4 intentos fallidos: deben retornar 400
+    for (let i = 0; i < 4; i++) {
+      await assert.rejects(
+        async () => {
+          await authService.verificarCodigo(testEmail, '000000');
+        },
+        (err: any) => err.statusCode === 400
+      );
+    }
+
+    // 5to intento fallido: debe bloquear con 429
+    await assert.rejects(
+      async () => {
+        await authService.verificarCodigo(testEmail, '000000');
+      },
+      (err: any) => err.statusCode === 429 && err.message.includes('límite máximo de 5 intentos')
+    );
+  });
+
+  it('OTP Seguridad: Rate limiting de 60 segundos al solicitar reenvío de código (HTTP 429)', async () => {
+    const testEmail = `otp.ratelimit.${Date.now()}@test.com`;
+    // Primer registro despacha el código inicial
+    await authService.register({
+      nombre: 'Usuario Rate Limit OTP',
+      email: testEmail,
+      contrasena: 'PassSecure123!',
+      dni: '37111222'
+    });
+
+    // Intentar reenviar inmediatamente (antes de los 60s) debe ser bloqueado con 429
+    await assert.rejects(
+      async () => {
+        await authService.reenviarCodigo(testEmail);
+      },
+      (err: any) => err.statusCode === 429 && err.message.includes('esperar')
     );
   });
 });

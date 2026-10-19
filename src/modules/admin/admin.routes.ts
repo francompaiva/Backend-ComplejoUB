@@ -10,8 +10,8 @@ router.use(authMiddleware);
 router.use(requireRole('Superadministrador', 'Administrador'));
 
 router.get('/administradores', (req, res, next) => adminController.getAdministradores(req, res, next));
-router.post('/promover', (req, res, next) => adminController.promoverUsuario(req, res, next));
-router.post('/crear-admin', (req, res, next) => adminController.crearAdministrador(req, res, next));
-router.delete('/revocar/:id', (req, res, next) => adminController.revocarAdministrador(req, res, next));
+router.post('/promover', requireRole('Superadministrador'), (req, res, next) => adminController.promoverUsuario(req, res, next));
+router.post('/crear-admin', requireRole('Superadministrador'), (req, res, next) => adminController.crearAdministrador(req, res, next));
+router.delete('/revocar/:id', requireRole('Superadministrador'), (req, res, next) => adminController.revocarAdministrador(req, res, next));
 
 export default router;

@@ -8,7 +8,7 @@ export class AdminService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows] = await pool.query(
-        `SELECT id, nombre, email, rol, telefono, estado_cuenta, email_verificado, created_at 
+        `SELECT id, nombre, email, dni, rol, telefono, estado_cuenta, email_verificado, created_at 
          FROM usuario 
          WHERE rol IN ('Administrador', 'Superadministrador', 'Arbitro') 
          ORDER BY (rol = 'Superadministrador') DESC, (rol = 'Administrador') DESC, nombre ASC`
@@ -69,11 +69,22 @@ export class AdminService {
     }
   }
 
-  async crearAdministrador(data: { nombre: string; email: string; contrasena: string; telefono?: string; rol?: 'Administrador' | 'Arbitro' }, createdById: number) {
+  async crearAdministrador(data: { nombre: string; email: string; contrasena: string; dni?: string; documento?: string; telefono?: string; rol?: 'Administrador' | 'Arbitro' }, createdById: number) {
     const { nombre, email, contrasena, telefono } = data;
     const rol = data.rol || 'Administrador';
+    const rawDni = data.dni || (data as any).documento || '';
+    const dni = String(rawDni).replace(/\D/g, '').trim();
+
     if (!nombre || !email || !contrasena) {
       throw new AppError('Nombre, email y contraseña son obligatorios', 400);
+    }
+
+    if (!dni) {
+      throw new AppError('El DNI es obligatorio para dar de alta autoridades y personal oficial', 400);
+    }
+
+    if (dni.length < 7 || dni.length > 8) {
+      throw new AppError('El DNI debe contener exactamente 7 u 8 dígitos numéricos', 400);
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -86,28 +97,41 @@ export class AdminService {
 
     if (isDbConnected()) {
       const pool = getPool()!;
+      // Validar unicidad de DNI
+      const [existingDni]: any = await pool.query(
+        'SELECT id FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+        [dni]
+      );
+      if (existingDni && existingDni.length > 0) {
+        throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+      }
+
       const [existing]: any = await pool.query('SELECT id FROM usuario WHERE email = ?', [email]);
       if (existing && existing.length > 0) {
         throw new AppError('Ese correo ya está registrado en el sistema', 409);
       }
 
       const [result]: any = await pool.query(
-        'INSERT INTO usuario (nombre, email, contrasena_hash, rol, telefono, email_verificado) VALUES (?, ?, ?, ?, ?, true)',
-        [nombre, email, hash, rol, telefono || null]
+        'INSERT INTO usuario (nombre, email, contrasena_hash, dni, rol, telefono, email_verificado) VALUES (?, ?, ?, ?, ?, ?, true)',
+        [nombre, email, hash, dni, rol, telefono || null]
       );
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_USUARIO", "usuario", ?, ?)',
-        [createdById, result.insertId, JSON.stringify({ nombre, email, rol })]
+        [createdById, result.insertId, JSON.stringify({ nombre, email, dni, rol })]
       );
 
       return {
         id: result.insertId,
         nombre,
         email,
+        dni,
         rol,
       };
     } else {
+      const existingDni = store.usuarios.find(u => u.dni && String(u.dni).replace(/\D/g, '') === dni);
+      if (existingDni) throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+
       const existing = store.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase());
       if (existing) throw new AppError('Ese correo ya está registrado en el sistema', 409);
 
@@ -117,6 +141,7 @@ export class AdminService {
         nombre,
         email,
         contrasena_hash: hash,
+        dni,
         rol,
         inasistencias: 0,
         estado_cuenta: 'Activa',
@@ -133,7 +158,7 @@ export class AdminService {
         accion: 'CREAR_USUARIO',
         entidad_afectada: 'usuario',
         entidad_id: newId,
-        detalles: JSON.stringify({ nombre, email, rol }),
+        detalles: JSON.stringify({ nombre, email, dni, rol }),
         ip_address: null,
         created_at: new Date().toISOString(),
       });

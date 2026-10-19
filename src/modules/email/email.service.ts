@@ -1,6 +1,15 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { ENV } from '../../config/env.js';
 
+export interface SendEmailResult {
+  success: boolean;
+  delivered: boolean;
+  isSandbox: boolean;
+  message: string;
+  previewUrl?: string | null;
+  error?: string;
+}
+
 export class EmailService {
   private transporter: Transporter | null = null;
   private isConfigured = false;
@@ -22,11 +31,11 @@ export class EmailService {
             user: ENV.SMTP.USER,
             pass: ENV.SMTP.PASSWORD,
           },
-          connectionTimeout: 3500,
-          greetingTimeout: 3500,
-          socketTimeout: 4500,
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 15000,
         });
-        console.log(`[EmailService] Configurado transportador Gmail Service oficial con usuario ${ENV.SMTP.USER}`);
+        console.log(`[EmailService] Configurado transportador Gmail oficial con usuario ${ENV.SMTP.USER}`);
       } else {
         this.transporter = nodemailer.createTransport({
           host: ENV.SMTP.HOST,
@@ -37,14 +46,24 @@ export class EmailService {
             pass: ENV.SMTP.PASSWORD,
           },
           ...(ENV.SMTP.PORT === 587 ? { requireTLS: true } : {}),
-          connectionTimeout: 3500,
-          greetingTimeout: 3500,
-          socketTimeout: 4500,
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 15000,
         });
         console.log(`[EmailService] Configurado transportador SMTP (${ENV.SMTP.HOST}:${ENV.SMTP.PORT}) con usuario ${ENV.SMTP.USER}`);
       }
       this.isConfigured = true;
       this.isEthereal = false;
+
+      // Verificación proactiva de credenciales SMTP
+      this.transporter.verify((verifyErr) => {
+        if (verifyErr) {
+          console.error(`[EmailService] ❌ Verificación de credenciales SMTP falló: ${verifyErr.message}. Verifica usuario y Contraseña de Aplicación en Render.`);
+          this.isConfigured = false;
+        } else {
+          console.log(`[EmailService] ✅ Conexión SMTP verificada exitosamente. Listo para entregar correos a bandejas reales.`);
+        }
+      });
     } else {
       // Modo Desarrollo / Fallback: Ethereal con timeout ágil o simulación por consola
       try {
@@ -66,7 +85,7 @@ export class EmailService {
             greetingTimeout: 3000,
             socketTimeout: 4000,
           });
-          this.isConfigured = true;
+          this.isConfigured = false; // Ethereal es simulador, no entrega a bandejas reales
           this.isEthereal = true;
           console.log(`[EmailService] Configurado Ethereal Mail para pruebas dev (${testAccount.user})`);
         }
@@ -78,7 +97,7 @@ export class EmailService {
     }
   }
 
-  async enviarCodigoVerificacion(email: string, nombre: string, codigo: string): Promise<boolean> {
+  async enviarCodigoVerificacion(email: string, nombre: string, codigo: string): Promise<SendEmailResult> {
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; background-color: #1e281d; color: #ffffff; padding: 30px; border-radius: 12px; max-width: 500px; margin: auto;">
         <h2 style="color: #65c556; text-align: center; margin-bottom: 20px;">Complejo Deportivo UB</h2>
@@ -97,20 +116,20 @@ export class EmailService {
       try {
         await Promise.race([
           this.initPromise,
-          new Promise((resolve) => setTimeout(resolve, 2000))
+          new Promise((resolve) => setTimeout(resolve, 3000))
         ]);
       } catch {
         // Ignorar demoras en la inicialización
       }
     }
 
-    // Siempre imprimir en consola para evaluación docente inmediata
+    // Siempre imprimir en consola para evaluación docente y auditoría
     console.log('\n======================================================');
     console.log(`📧 [EMAIL OTP] Destinatario: ${email}`);
     console.log(`🔑 CÓDIGO DE ACTIVACIÓN: ${codigo}`);
-    if (this.isEthereal) {
-      console.log(`ℹ️  [Modo Pruebas / Dev] El sistema está usando Ethereal Mail (simulación local).`);
-      console.log(`⚠️  Nota: Ethereal NO envía correos a bandejas reales (Gmail, Hotmail, etc.).`);
+    if (this.isEthereal || !this.isConfigured) {
+      console.log(`ℹ️  [Modo Pruebas / Dev] El sistema está usando simulación local.`);
+      console.log(`⚠️  Nota: Sin SMTP configurado, los correos NO se entregan a bandejas reales.`);
       if (ENV.AUTH?.OTP_MASTER_CODE) {
         console.log(`💡 Para activar la cuenta: ingresa el código ${codigo} o el bypass maestro ${ENV.AUTH.OTP_MASTER_CODE}.`);
       } else {
@@ -120,7 +139,12 @@ export class EmailService {
     console.log('======================================================\n');
 
     if (!this.transporter) {
-      return true;
+      return {
+        success: true,
+        delivered: false,
+        isSandbox: true,
+        message: 'Código generado en modo consola/dev.',
+      };
     }
 
     try {
@@ -133,13 +157,19 @@ export class EmailService {
       });
 
       const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
-        setTimeout(() => resolve({ timedOut: true }), 3500)
+        setTimeout(() => resolve({ timedOut: true }), 12000)
       );
 
       const result: any = await Promise.race([sendPromise, timeoutPromise]);
       if (result && result.timedOut) {
-        console.warn(`[EmailService] ⏱️ Timeout al enviar email vía SMTP a ${email}. Código OTP registrado en consola.`);
-        return true;
+        console.warn(`[EmailService] ⏱️ Timeout (12s) al conectar con SMTP para enviar a ${email}. Código registrado en consola.`);
+        return {
+          success: false,
+          delivered: false,
+          isSandbox: this.isEthereal,
+          message: 'El servidor de correo tardó demasiado en responder.',
+          error: 'TIMEOUT_SMTP',
+        };
       }
 
       if (this.isEthereal && result) {
@@ -147,13 +177,31 @@ export class EmailService {
         if (previewUrl) {
           console.log(`🔗 [Previsualización Ethereal Mail]: ${previewUrl}`);
         }
+        return {
+          success: true,
+          delivered: false,
+          isSandbox: true,
+          message: 'Código despachado en entorno de pruebas Ethereal.',
+          previewUrl: previewUrl || null,
+        };
       } else {
-        console.log(`✅ [EmailService] Correo enviado exitosamente vía SMTP a ${email} (${result?.response || 'OK'})`);
+        console.log(`✅ [EmailService] Correo aceptado y entregado exitosamente vía SMTP a ${email} (${result?.response || 'OK'})`);
+        return {
+          success: true,
+          delivered: true,
+          isSandbox: false,
+          message: 'Correo entregado exitosamente a tu casilla de correo.',
+        };
       }
-      return true;
     } catch (err: any) {
-      console.error(`[EmailService] ❌ Error al enviar email a ${email}: ${err.message}`);
-      return false;
+      console.error(`[EmailService] ❌ Error SMTP al enviar email a ${email}: ${err.message}`);
+      return {
+        success: false,
+        delivered: false,
+        isSandbox: this.isEthereal,
+        message: `Error al enviar correo por SMTP: ${err.message}`,
+        error: err.message,
+      };
     }
   }
 }
