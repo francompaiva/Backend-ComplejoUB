@@ -199,24 +199,20 @@ export class EquiposService {
     if (Array.isArray(rawPlayerList) && rawPlayerList.length > 0) {
       for (let i = 0; i < rawPlayerList.length; i++) {
         const p = rawPlayerList[i];
-        const dni = String(p.dni || p.documento || '').trim();
+        const dni = String(p.dni || p.documento || '').replace(/\D/g, '').trim();
         const pos = String(p.position || p.posicion || '').trim();
-        const nom = String(p.name || p.nombre || '').trim();
 
-        if (!nom) {
-          throw new AppError(`El nombre del jugador #${i + 1} es obligatorio`, 400);
-        }
         if (!dni) {
-          throw new AppError(`El DNI del jugador #${i + 1} (${nom}) es obligatorio`, 400);
+          throw new AppError(`El DNI del jugador #${i + 1} es obligatorio`, 400);
         }
         if (!DNI_REGEX.test(dni)) {
           throw new AppError(
-            `El DNI '${dni}' del jugador #${i + 1} (${nom}) es inválido: debe contener exactamente 7 u 8 dígitos numéricos sin letras, espacios, puntos ni símbolos`,
+            `El DNI '${dni}' del jugador #${i + 1} es inválido: debe contener exactamente 7 u 8 dígitos numéricos sin letras, espacios, puntos ni símbolos`,
             400
           );
         }
         if (!pos) {
-          throw new AppError(`La posición del jugador #${i + 1} (${nom}) es obligatoria`, 400);
+          throw new AppError(`La posición del jugador #${i + 1} es obligatoria`, 400);
         }
         const isPosValid = posicionesValidas.some(v => v.localeCompare(pos, undefined, { sensitivity: 'accent' }) === 0);
         if (!isPosValid) {
@@ -225,6 +221,38 @@ export class EquiposService {
             400
           );
         }
+
+        // Buscar al usuario registrado en la base de datos por DNI y tomar su nombre real
+        let regUser: any = null;
+        if (isDbConnected()) {
+          const pool = getPool()!;
+          const [uRows]: any = await pool.query(
+            'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+            [dni]
+          );
+          if (uRows && uRows.length > 0) regUser = uRows[0];
+        } else {
+          regUser = store.usuarios.find(u => u.dni && String(u.dni).replace(/\D/g, '') === dni);
+        }
+
+        if (!regUser) {
+          throw new AppError(
+            `El jugador con DNI '${dni}' no se encuentra registrado en el sistema. Todos los integrantes del plantel deben poseer una cuenta activa previamente en Complejo Deportivo UB para poder ser inscriptos.`,
+            400
+          );
+        }
+
+        if (regUser.estado_cuenta === 'Suspendida') {
+          throw new AppError(
+            `El jugador ${regUser.nombre} (DNI ${dni}) posee su cuenta suspendida por acumulación de inasistencias o sanciones y no puede ser inscripto.`,
+            400
+          );
+        }
+
+        // Asignar el nombre oficial de la base de datos (ignorar cualquier nombre enviado por el cliente)
+        p.name = regUser.nombre;
+        p.nombre = regUser.nombre;
+        p.usuarioId = regUser.id;
       }
 
       // Verificar que no haya DNIs duplicados en la nómina presentada
@@ -734,6 +762,45 @@ export class EquiposService {
         `El jugador ${ident} ya se encuentra inscripto en el equipo '${rows[0].equipo_nombre}' dentro de este mismo torneo. No se permite jugar en más de un equipo por certamen.`,
         409
       );
+    }
+  }
+
+  /**
+   * Búsqueda automática de jugador registrado por DNI para corroborar cuenta previa en la plataforma
+   */
+  async buscarJugadorPorDni(rawDni: string) {
+    const cleanDni = String(rawDni || '').replace(/\D/g, '').trim();
+    if (!cleanDni || cleanDni.length < 7 || cleanDni.length > 8) {
+      throw new AppError('El DNI ingresado debe contener 7 u 8 dígitos numéricos', 400);
+    }
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const [rows]: any = await pool.query(
+        'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+        [cleanDni]
+      );
+      if (!rows || rows.length === 0) {
+        throw new AppError(`Usuario no registrado: el jugador con DNI ${cleanDni} debe registrarse previamente en Complejo Deportivo UB`, 404);
+      }
+      const u = rows[0];
+      return {
+        id: u.id,
+        nombre: u.nombre,
+        dni: u.dni,
+        estado_cuenta: u.estado_cuenta,
+      };
+    } else {
+      const u = store.usuarios.find(user => user.dni && String(user.dni).replace(/\D/g, '') === cleanDni);
+      if (!u) {
+        throw new AppError(`Usuario no registrado: el jugador con DNI ${cleanDni} debe registrarse previamente en Complejo Deportivo UB`, 404);
+      }
+      return {
+        id: u.id,
+        nombre: u.nombre,
+        dni: u.dni,
+        estado_cuenta: u.estado_cuenta,
+      };
     }
   }
 }

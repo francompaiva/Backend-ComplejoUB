@@ -519,6 +519,34 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     const partidos = await torneosService.getFixture(1);
     assert.ok(partidos.length > 0, 'El historial de partidos debe permanecer intacto');
   });
+
+  it('Corrección Adicional: Búsqueda de jugador por DNI en padrón y validación estricta', async () => {
+    // 1. DNI registrado existente
+    const jugador = await equiposService.buscarJugadorPorDni('38109223');
+    assert.ok(jugador, 'Debe encontrar al usuario');
+    assert.equal(jugador.dni, '38109223');
+    assert.ok(jugador.nombre, 'Debe tener nombre asignado');
+
+    // 2. DNI no registrado retorna 404
+    await assert.rejects(
+      async () => {
+        await equiposService.buscarJugadorPorDni('99999999');
+      },
+      (err: any) => {
+        return err.statusCode === 404 && err.message.includes('Usuario no registrado');
+      }
+    );
+
+    // 3. Formato DNI inválido (menos de 7 dígitos) retorna 400
+    await assert.rejects(
+      async () => {
+        await equiposService.buscarJugadorPorDni('1234');
+      },
+      (err: any) => {
+        return err.statusCode === 400 && err.message.includes('7 u 8 dígitos');
+      }
+    );
+  });
 });
 
 

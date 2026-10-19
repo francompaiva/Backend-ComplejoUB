@@ -13,6 +13,7 @@ router.get('/mis-equipos', authMiddleware, (req, res, next) => equiposController
 router.get('/historial', authMiddleware, (req, res, next) => equiposController.getMisEquipos(req, res, next));
 
 // Consultas de equipos (públicas o autenticadas)
+router.get('/buscar-jugador/:dni', (req, res, next) => equiposController.buscarJugadorPorDni(req, res, next));
 router.get('/', (req, res, next) => equiposController.getAll(req, res, next));
 router.get('/:id', (req, res, next) => equiposController.getById(req, res, next));
 

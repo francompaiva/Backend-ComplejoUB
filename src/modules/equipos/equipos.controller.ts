@@ -79,6 +79,16 @@ export class EquiposController {
       next(error);
     }
   }
+
+  async buscarJugadorPorDni(req: Request, res: Response, next: NextFunction) {
+    try {
+      const dni = req.params.dni;
+      const jugador = await equiposService.buscarJugadorPorDni(dni);
+      res.status(200).json({ success: true, data: jugador });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const equiposController = new EquiposController();
