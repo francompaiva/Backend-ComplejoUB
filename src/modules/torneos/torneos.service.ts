@@ -402,13 +402,43 @@ export class TorneosService {
 
   /**
    * RF-07 / Admin: Eliminación de torneo y datos asociados
+   * BUG-011: Protección estricta de historial deportivo y partidos disputados
    */
   async delete(id: number, adminId: number) {
     const torneo = await this.getById(id);
 
+    // 1. Prohibir eliminación si el torneo cuenta con partidos disputados
     if (isDbConnected()) {
       const pool = getPool()!;
-      // En MySQL las foreign keys fk_partido_torneo y fk_equipo_torneo tienen ON DELETE CASCADE
+      const [disputadosRows]: any = await pool.query(
+        'SELECT COUNT(*) as count FROM partido WHERE fk_torneo_id = ? AND estado = "DISPUTADO"',
+        [id]
+      );
+      const disputados = disputadosRows && disputadosRows[0] ? Number(disputadosRows[0].count) : 0;
+      if (disputados > 0) {
+        throw new AppError(
+          `No es posible eliminar el torneo "${torneo.nombre}" porque ya cuenta con ${disputados} partido(s) disputado(s) e historial deportivo registrado. Para cerrarlo, debe archivarse o marcarse como Finalizado/Cancelado.`,
+          400
+        );
+      }
+
+      if (torneo.estado !== 'INSCRIPCION_ABIERTA') {
+        throw new AppError(
+          `No es posible eliminar físicamente un torneo en estado "${torneo.estado}". Solo pueden eliminarse torneos en estado "INSCRIPCION_ABIERTA" sin actividad deportiva disputada.`,
+          400
+        );
+      }
+
+      const [partidosRows]: any = await pool.query('SELECT COUNT(*) as count FROM partido WHERE fk_torneo_id = ?', [id]);
+      const totalPartidos = partidosRows && partidosRows[0] ? Number(partidosRows[0].count) : 0;
+      if (totalPartidos > 0) {
+        throw new AppError(
+          `No es posible eliminar el torneo porque ya posee un fixture generado con ${totalPartidos} partido(s). Cancele el torneo en lugar de eliminarlo para preservar la integridad operativa.`,
+          400
+        );
+      }
+
+      // Proceder con la eliminación física segura
       await pool.query('DELETE FROM torneo WHERE id = ?', [id]);
 
       await pool.query(
@@ -416,16 +446,33 @@ export class TorneosService {
         [adminId, id, JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte })]
       );
     } else {
-      // Limpiar datos asociados en memoria
+      const disputados = store.partidos.filter(p => p.fk_torneo_id === id && p.estado === 'DISPUTADO').length;
+      if (disputados > 0) {
+        throw new AppError(
+          `No es posible eliminar el torneo "${torneo.nombre}" porque ya cuenta con ${disputados} partido(s) disputado(s) e historial deportivo registrado. Para cerrarlo, debe archivarse o marcarse como Finalizado/Cancelado.`,
+          400
+        );
+      }
+
+      if (torneo.estado !== 'INSCRIPCION_ABIERTA') {
+        throw new AppError(
+          `No es posible eliminar físicamente un torneo en estado "${torneo.estado}". Solo pueden eliminarse torneos en estado "INSCRIPCION_ABIERTA" sin actividad deportiva disputada.`,
+          400
+        );
+      }
+
+      const totalPartidos = store.partidos.filter(p => p.fk_torneo_id === id).length;
+      if (totalPartidos > 0) {
+        throw new AppError(
+          `No es posible eliminar el torneo porque ya posee un fixture generado con ${totalPartidos} partido(s). Cancele el torneo en lugar de eliminarlo para preservar la integridad operativa.`,
+          400
+        );
+      }
+
+      // Limpiar datos asociados en memoria solo si no tiene partidos
       const equiposDelTorneo = store.equipos.filter(e => e.fk_torneo_id === id).map(e => e.id);
       store.equipoJugadores = store.equipoJugadores.filter(ej => !equiposDelTorneo.includes(ej.fk_equipo_id));
       store.equipos = store.equipos.filter(e => e.fk_torneo_id !== id);
-
-      const partidosDelTorneo = store.partidos.filter(p => p.fk_torneo_id === id).map(p => p.id);
-      store.sanciones = store.sanciones.map(s =>
-        s.fk_partido_id && partidosDelTorneo.includes(s.fk_partido_id) ? { ...s, fk_partido_id: null } : s
-      );
-      store.partidos = store.partidos.filter(p => p.fk_torneo_id !== id);
       store.torneos = store.torneos.filter(t => t.id !== id);
 
       store.auditLogs.push({
@@ -441,6 +488,40 @@ export class TorneosService {
     }
 
     return { id, message: `Torneo "${torneo.nombre}" eliminado exitosamente` };
+  }
+
+  /**
+   * Cancelar o archivar torneo preservando su historial deportivo completo
+   */
+  async cancelar(id: number, adminId: number, motivo?: string) {
+    const torneo = await this.getById(id);
+    if (torneo.estado === 'CANCELADO') {
+      throw new AppError('El torneo ya se encuentra cancelado', 400);
+    }
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      await pool.query('UPDATE torneo SET estado = "CANCELADO" WHERE id = ?', [id]);
+      await pool.query(
+        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CANCELAR_TORNEO", "torneo", ?, ?)',
+        [adminId, id, JSON.stringify({ nombre: torneo.nombre, motivo: motivo || 'Cancelado por administración' })]
+      );
+    } else {
+      const t = store.torneos.find(item => item.id === id);
+      if (t) t.estado = 'CANCELADO';
+      store.auditLogs.push({
+        id: store.auditLogs.length + 1,
+        fk_usuario_id: adminId,
+        accion: 'CANCELAR_TORNEO',
+        entidad_afectada: 'torneo',
+        entidad_id: id,
+        detalles: JSON.stringify({ nombre: torneo.nombre, motivo: motivo || 'Cancelado por administración' }),
+        ip_address: '127.0.0.1',
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    return { id, estado: 'CANCELADO', message: `Torneo "${torneo.nombre}" cancelado y archivado exitosamente para preservar su historial.` };
   }
 }
 

@@ -74,6 +74,18 @@ export class TorneosController {
       next(error);
     }
   }
+
+  async cancelar(req: Request, res: Response, next: NextFunction) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const adminId = req.user!.id;
+      const motivo = req.body.motivo as string | undefined;
+      const result = await torneosService.cancelar(id, adminId, motivo);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const torneosController = new TorneosController();

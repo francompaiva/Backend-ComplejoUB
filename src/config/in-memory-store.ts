@@ -63,7 +63,7 @@ export interface TorneoModel {
   max_jugadores_equipo: number;
   fecha_inicio: string | null;
   fecha_fin: string | null;
-  estado: 'INSCRIPCION_ABIERTA' | 'EN_CURSO' | 'FINALIZADO';
+  estado: 'INSCRIPCION_ABIERTA' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO';
   reglamento?: string;
 }
 

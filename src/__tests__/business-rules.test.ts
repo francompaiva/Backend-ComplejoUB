@@ -499,6 +499,26 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       }
     }
   });
+
+  it('BUG-011: Bloquear eliminación destructiva de torneos con partidos o historial deportivo', async () => {
+    // Torneo 1 tiene partidos en seeds/store
+    await assert.rejects(
+      async () => {
+        await torneosService.delete(1, 1);
+      },
+      (err: any) => {
+        return err.statusCode === 400 && (err.message.includes('partido') || err.message.includes('historial') || err.message.includes('archivarse') || err.message.includes('fixture'));
+      }
+    );
+
+    // Cancelar torneo sí debe ser permitido sin perder datos ni historial
+    const cancelado = await torneosService.cancelar(1, 1, 'Finalización administrativa de temporada');
+    assert.equal(cancelado.estado, 'CANCELADO');
+
+    // Los partidos del torneo deben seguir existiendo intactos
+    const partidos = await torneosService.getFixture(1);
+    assert.ok(partidos.length > 0, 'El historial de partidos debe permanecer intacto');
+  });
 });
 
 

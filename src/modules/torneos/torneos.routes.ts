@@ -21,5 +21,8 @@ router.post('/:id/generar-fixture', authMiddleware, requireRole('Administrador')
 router.delete('/:id', authMiddleware, requireRole('Administrador'), (req, res, next) =>
   torneosController.delete(req, res, next)
 );
+router.put('/:id/cancelar', authMiddleware, requireRole('Administrador'), (req, res, next) =>
+  torneosController.cancelar(req, res, next)
+);
 
 export default router;
