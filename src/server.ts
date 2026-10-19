@@ -46,6 +46,8 @@ app.get('/api/v1/docs.json', (_req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerDocument);
 });
+app.get('/api/docs', (_req, res) => res.redirect('/api/v1/docs'));
+app.get('/docs', (_req, res) => res.redirect('/api/v1/docs'));
 
 // Rutas de API
 app.use('/api/v1', apiRoutes);
