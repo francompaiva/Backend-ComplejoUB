@@ -68,7 +68,7 @@ BEGIN
       SUM(CASE WHEN goles_visitante = goles_local THEN 1 ELSE 0 END) AS pe,
       SUM(CASE WHEN goles_visitante < goles_local THEN 1 ELSE 0 END) AS pp,
       SUM(COALESCE(goles_visitante, 0)) AS gf,
-      SUM(COALESCE(goles_contra, 0)) AS gc,
+      SUM(COALESCE(goles_local, 0)) AS gc,
       SUM(CASE 
         WHEN goles_visitante > goles_local THEN 3 
         WHEN goles_visitante = goles_local THEN 1 
@@ -354,3 +354,4 @@ DELIMITER ;
 
 CALL sp_recalcular_todos_los_torneos();
 DROP PROCEDURE IF EXISTS sp_recalcular_todos_los_torneos;
+

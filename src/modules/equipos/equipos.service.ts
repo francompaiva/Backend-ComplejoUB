@@ -310,9 +310,9 @@ export class EquiposService {
       const resolvedTeammates: Array<{ user: any; dni: string; position: string; dorsal?: number }> = [];
       for (let i = 0; i < teammates.length; i++) {
         const p = teammates[i];
-        const dni = String(p.dni || p.documento || '').trim();
+        const dni = String(p.dni || p.documento || '').replace(/\D/g, '').trim();
         const [uRows]: any = await pool.query(
-          'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE dni = ?',
+          'SELECT id, nombre, email, dni, estado_cuenta FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
           [dni]
         );
         if (!uRows || uRows.length === 0) {
