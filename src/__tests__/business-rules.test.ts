@@ -426,7 +426,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       max_equipos: 8,
       min_jugadores_equipo: 2,
       max_jugadores_equipo: 4
-    });
+    }, 1);
 
     const eqMulti = await equiposService.inscribirEquipo(10, {
       torneoId: tNuevo.id,
@@ -646,7 +646,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       max_equipos: 8,
       min_jugadores_equipo: 5,
       max_jugadores_equipo: 12
-    });
+    }, 1);
 
     // Usuario ID 4 (Lucas Diaz, Cliente) intenta anotar al Árbitro Marcos Perez (DNI 33444555)
     await assert.rejects(
@@ -701,7 +701,7 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     assert.equal(adminCreated.nombre, 'Admin Auditoria Test');
     assert.equal(adminCreated.dni, '38999111');
     assert.equal(adminCreated.rol, 'Administrador');
-    assert.equal(adminCreated.email_verificado, true);
+    assert.equal((adminCreated as any).email_verificado, true);
 
     // Crear un nuevo Árbitro con DNI válido de 8 dígitos
     const arbitroCreated = await adminService.crearAdministrador(
@@ -716,10 +716,10 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
     );
     assert.equal(arbitroCreated.rol, 'Arbitro');
     assert.equal(arbitroCreated.dni, '27888999');
-    assert.equal(arbitroCreated.email_verificado, true);
+    assert.equal((arbitroCreated as any).email_verificado, true);
 
     // Verificar que figuren en la lista de administradores/árbitros
-    const list = await adminService.getAdministradores();
+    const list: any = await adminService.getAdministradores();
     assert.ok(list.some((u: any) => u.dni === '38999111'));
     assert.ok(list.some((u: any) => u.dni === '27888999'));
 
