@@ -21,6 +21,14 @@ export interface LoginDTO {
 }
 
 export class AuthService {
+  private async notificarCodigoOtp(email: string, nombre: string, codigo: string) {
+    try {
+      await emailService.enviarCodigoVerificacion(email, nombre, codigo);
+    } catch (err: any) {
+      console.warn(`[authService] Advertencia al despachar código OTP a ${email}: ${err?.message}`);
+    }
+  }
+
   async register(data: RegisterDTO) {
     const nombre = (data.nombre || (data as any).name || '').trim();
     const email = (data.email || '').trim();
@@ -84,7 +92,7 @@ export class AuthService {
             'UPDATE usuario SET nombre = ?, contrasena_hash = ?, dni = ?, telefono = ?, codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
             [nombre, hash, dni, telefono || null, codigo, expiracion, existing[0].id]
           );
-          await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+          await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
@@ -100,7 +108,7 @@ export class AuthService {
         [nombre, emailTrimmed, hash, dni, rol, telefono || null, codigo, expiracion]
       );
 
-      await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+      await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
 
       return {
         requiresVerification: true,
@@ -123,7 +131,7 @@ export class AuthService {
           if (telefono) existing.telefono = telefono;
           existing.codigo_verificacion = codigo;
           existing.codigo_expiracion = expiracion.toISOString();
-          await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+          await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
           return {
             requiresVerification: true,
             email: emailTrimmed,
@@ -152,7 +160,7 @@ export class AuthService {
       };
       store.usuarios.push(newUser);
 
-      await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
+      await this.notificarCodigoOtp(emailTrimmed, nombre, codigo);
 
       return {
         requiresVerification: true,
@@ -261,7 +269,7 @@ export class AuthService {
         [codigo, expiracion, user.id]
       );
 
-      await emailService.enviarCodigoVerificacion(emailTrimmed, user.nombre, codigo);
+      await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
       return { success: true, message: 'Código reenviado con éxito.' };
     } else {
       const user = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
@@ -270,7 +278,7 @@ export class AuthService {
       user.codigo_verificacion = codigo;
       user.codigo_expiracion = expiracion.toISOString();
 
-      await emailService.enviarCodigoVerificacion(emailTrimmed, user.nombre, codigo);
+      await this.notificarCodigoOtp(emailTrimmed, user.nombre, codigo);
       return { success: true, message: 'Código reenviado con éxito.' };
     }
   }
@@ -325,7 +333,7 @@ export class AuthService {
         user.codigo_expiracion = expiracion.toISOString();
       }
 
-      await emailService.enviarCodigoVerificacion(user.email, user.nombre, codigo);
+      await this.notificarCodigoOtp(user.email, user.nombre, codigo);
 
       throw new AppError(
         'Debes activar tu cuenta antes de ingresar. Te hemos enviado un nuevo código de activación a tu casilla de correo.',

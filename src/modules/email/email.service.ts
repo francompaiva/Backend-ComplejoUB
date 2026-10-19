@@ -22,6 +22,9 @@ export class EmailService {
             user: ENV.SMTP.USER,
             pass: ENV.SMTP.PASSWORD,
           },
+          connectionTimeout: 3500,
+          greetingTimeout: 3500,
+          socketTimeout: 4500,
         });
         console.log(`[EmailService] Configurado transportador Gmail Service oficial con usuario ${ENV.SMTP.USER}`);
       } else {
@@ -34,31 +37,43 @@ export class EmailService {
             pass: ENV.SMTP.PASSWORD,
           },
           ...(ENV.SMTP.PORT === 587 ? { requireTLS: true } : {}),
+          connectionTimeout: 3500,
+          greetingTimeout: 3500,
+          socketTimeout: 4500,
         });
         console.log(`[EmailService] Configurado transportador SMTP (${ENV.SMTP.HOST}:${ENV.SMTP.PORT}) con usuario ${ENV.SMTP.USER}`);
       }
       this.isConfigured = true;
       this.isEthereal = false;
     } else {
-      // Modo Desarrollo / Fallback: Ethereal o simulación por consola
+      // Modo Desarrollo / Fallback: Ethereal con timeout ágil o simulación por consola
       try {
-        const testAccount = await nodemailer.createTestAccount();
-        this.transporter = nodemailer.createTransport({
-          host: 'smtp.ethereal.email',
-          port: 587,
-          secure: false,
-          auth: {
-            user: testAccount.user,
-            pass: testAccount.pass,
-          },
-        });
-        this.isConfigured = true;
-        this.isEthereal = true;
-        console.log(`[EmailService] Configurado Ethereal Mail para pruebas dev (${testAccount.user})`);
+        const testAccountPromise = nodemailer.createTestAccount();
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout creación cuenta Ethereal')), 2500)
+        );
+        const testAccount: any = await Promise.race([testAccountPromise, timeoutPromise]);
+        if (testAccount) {
+          this.transporter = nodemailer.createTransport({
+            host: 'smtp.ethereal.email',
+            port: 587,
+            secure: false,
+            auth: {
+              user: testAccount.user,
+              pass: testAccount.pass,
+            },
+            connectionTimeout: 3000,
+            greetingTimeout: 3000,
+            socketTimeout: 4000,
+          });
+          this.isConfigured = true;
+          this.isEthereal = true;
+          console.log(`[EmailService] Configurado Ethereal Mail para pruebas dev (${testAccount.user})`);
+        }
       } catch (err) {
         this.isConfigured = false;
         this.isEthereal = true;
-        console.log('[EmailService] SMTP no configurado. Modo consola activado para códigos OTP.');
+        console.log('[EmailService] SMTP no configurado / Ethereal no disponible. Modo consola activado para códigos OTP.');
       }
     }
   }
@@ -79,7 +94,14 @@ export class EmailService {
     `;
 
     if (this.initPromise) {
-      await this.initPromise;
+      try {
+        await Promise.race([
+          this.initPromise,
+          new Promise((resolve) => setTimeout(resolve, 2000))
+        ]);
+      } catch {
+        // Ignorar demoras en la inicialización
+      }
     }
 
     // Siempre imprimir en consola para evaluación docente inmediata
@@ -102,21 +124,31 @@ export class EmailService {
     }
 
     try {
-      const sender = `${ENV.SMTP.FROM_NAME || 'Complejo Deportivo UB'} <${ENV.SMTP.USER || ENV.SMTP.FROM_EMAIL}>`;
-      const info = await this.transporter.sendMail({
+      const sender = `${ENV.SMTP.FROM_NAME || 'Complejo Deportivo UB'} <${ENV.SMTP.USER || ENV.SMTP.FROM_EMAIL || 'no-reply@complejoub.com'}>`;
+      const sendPromise = this.transporter.sendMail({
         from: sender,
         to: email,
         subject: `Tu código de verificación UB: ${codigo}`,
         html: htmlContent,
       });
 
-      if (this.isEthereal) {
-        const previewUrl = nodemailer.getTestMessageUrl(info);
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
+        setTimeout(() => resolve({ timedOut: true }), 3500)
+      );
+
+      const result: any = await Promise.race([sendPromise, timeoutPromise]);
+      if (result && result.timedOut) {
+        console.warn(`[EmailService] ⏱️ Timeout al enviar email vía SMTP a ${email}. Código OTP registrado en consola.`);
+        return true;
+      }
+
+      if (this.isEthereal && result) {
+        const previewUrl = nodemailer.getTestMessageUrl(result);
         if (previewUrl) {
           console.log(`🔗 [Previsualización Ethereal Mail]: ${previewUrl}`);
         }
       } else {
-        console.log(`✅ [EmailService] Correo enviado exitosamente vía SMTP a ${email} (${info.response || 'OK'})`);
+        console.log(`✅ [EmailService] Correo enviado exitosamente vía SMTP a ${email} (${result?.response || 'OK'})`);
       }
       return true;
     } catch (err: any) {
