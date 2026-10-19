@@ -12,5 +12,6 @@ router.post('/login', (req, res, next) => authController.login(req, res, next));
 
 // Rutas protegidas
 router.get('/me', authMiddleware, (req, res, next) => authController.getMe(req, res, next));
+router.put('/dni', authMiddleware, (req, res, next) => authController.actualizarDni(req, res, next));
 
 export default router;

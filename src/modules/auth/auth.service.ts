@@ -10,6 +10,7 @@ export interface RegisterDTO {
   nombre: string;
   email: string;
   contrasena: string;
+  dni: string;
   rol?: 'Cliente' | 'Administrador' | 'Arbitro' | 'Superadministrador';
   telefono?: string;
 }
@@ -25,12 +26,22 @@ export class AuthService {
     const email = (data.email || '').trim();
     const contrasena = data.contrasena || (data as any).password || '';
     const telefono = (data.telefono || (data as any).phone || '').trim();
+    const rawDni = data.dni || (data as any).documento || '';
+    const dni = String(rawDni).replace(/\D/g, '').trim();
     // Seguridad y RBAC: En el registro público el rol siempre se restringe estrictamente a 'Cliente'.
     // La asignación de roles administrativos está restringida al endpoint protegido de administración.
     const rol = 'Cliente';
 
     if (!nombre || !email || !contrasena) {
       throw new AppError('Nombre, email y contraseña son obligatorios', 400);
+    }
+
+    if (!dni) {
+      throw new AppError('El DNI es obligatorio para registrarse en Complejo Deportivo UB', 400);
+    }
+
+    if (dni.length < 7 || dni.length > 8) {
+      throw new AppError('El DNI debe contener exactamente 7 u 8 dígitos numéricos sin letras, puntos ni símbolos', 400);
     }
 
     const emailTrimmed = email.trim().toLowerCase();
@@ -52,13 +63,26 @@ export class AuthService {
 
     if (isDbConnected()) {
       const pool = getPool()!;
+
+      // Validar unicidad de DNI en MySQL
+      const [existingDni]: any = await pool.query(
+        'SELECT id, email, email_verificado FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ?',
+        [dni]
+      );
+      if (existingDni && existingDni.length > 0) {
+        const matchUser = existingDni[0];
+        if (matchUser.email.toLowerCase() !== emailTrimmed) {
+          throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+        }
+      }
+
       const [existing]: any = await pool.query('SELECT id, email_verificado FROM usuario WHERE email = ?', [emailTrimmed]);
       if (existing && existing.length > 0) {
         if (!existing[0].email_verificado) {
-          // Si el usuario ya existía pero no verificó su correo, actualizamos contraseña, datos y código OTP
+          // Si el usuario ya existía pero no verificó su correo, actualizamos contraseña, DNI, datos y código OTP
           await pool.query(
-            'UPDATE usuario SET nombre = ?, contrasena_hash = ?, telefono = ?, codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
-            [nombre, hash, telefono || null, codigo, expiracion, existing[0].id]
+            'UPDATE usuario SET nombre = ?, contrasena_hash = ?, dni = ?, telefono = ?, codigo_verificacion = ?, codigo_expiracion = ? WHERE id = ?',
+            [nombre, hash, dni, telefono || null, codigo, expiracion, existing[0].id]
           );
           await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
           return {
@@ -71,9 +95,9 @@ export class AuthService {
       }
 
       await pool.query(
-        `INSERT INTO usuario (nombre, email, contrasena_hash, rol, telefono, email_verificado, codigo_verificacion, codigo_expiracion) 
-         VALUES (?, ?, ?, ?, ?, false, ?, ?)`,
-        [nombre, emailTrimmed, hash, rol, telefono || null, codigo, expiracion]
+        `INSERT INTO usuario (nombre, email, contrasena_hash, dni, rol, telefono, email_verificado, codigo_verificacion, codigo_expiracion) 
+         VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)`,
+        [nombre, emailTrimmed, hash, dni, rol, telefono || null, codigo, expiracion]
       );
 
       await emailService.enviarCodigoVerificacion(emailTrimmed, nombre, codigo);
@@ -84,11 +108,18 @@ export class AuthService {
         message: 'Registro iniciado. Te enviamos un código de 6 dígitos para verificar tu cuenta.',
       };
     } else {
+      // Validar unicidad de DNI en memoria
+      const existingDni = store.usuarios.find(u => u.dni && String(u.dni).replace(/\D/g, '') === dni);
+      if (existingDni && existingDni.email.toLowerCase() !== emailTrimmed) {
+        throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+      }
+
       const existing = store.usuarios.find(u => u.email.toLowerCase() === emailTrimmed);
       if (existing) {
         if (!existing.email_verificado) {
           existing.nombre = nombre;
           existing.contrasena_hash = hash;
+          existing.dni = dni;
           if (telefono) existing.telefono = telefono;
           existing.codigo_verificacion = codigo;
           existing.codigo_expiracion = expiracion.toISOString();
@@ -108,6 +139,7 @@ export class AuthService {
         nombre,
         email: emailTrimmed,
         contrasena_hash: hash,
+        dni,
         rol,
         inasistencias: 0,
         estado_cuenta: 'Activa',
@@ -172,6 +204,7 @@ export class AuthService {
           id: user.id,
           nombre: user.nombre,
           email: user.email,
+          dni: user.dni || null,
           rol: user.rol,
           inasistencias: user.inasistencias,
           estado_cuenta: user.estado_cuenta,
@@ -325,6 +358,7 @@ export class AuthService {
         id: user.id,
         nombre: user.nombre,
         email: user.email,
+        dni: user.dni || null,
         rol: user.rol,
         inasistencias: isSuspended ? user.inasistencias : 0,
         estado_cuenta: isSuspended ? 'Suspendida' : 'Activa',
@@ -338,7 +372,7 @@ export class AuthService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        'SELECT id, nombre, email, rol, inasistencias, estado_cuenta, suspension_hasta, telefono, created_at FROM usuario WHERE id = ?',
+        'SELECT id, nombre, email, dni, rol, inasistencias, estado_cuenta, suspension_hasta, telefono, created_at FROM usuario WHERE id = ?',
         [userId]
       );
       if (!rows || rows.length === 0) throw new AppError('Usuario no encontrado', 404);
@@ -360,6 +394,43 @@ export class AuthService {
       }
       const { contrasena_hash, ...profile } = user;
       return profile;
+    }
+  }
+
+  /**
+   * Permite a un usuario autenticado actualizar o completar su DNI
+   */
+  async actualizarDni(userId: number, rawDni: string) {
+    const cleanDni = String(rawDni || '').replace(/\D/g, '').trim();
+    if (!cleanDni) {
+      throw new AppError('El DNI es obligatorio', 400);
+    }
+    if (cleanDni.length < 7 || cleanDni.length > 8) {
+      throw new AppError('El DNI debe contener exactamente 7 u 8 dígitos numéricos sin letras, puntos ni símbolos', 400);
+    }
+
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      // Validar que ningún otro usuario tenga el mismo DNI
+      const [existing]: any = await pool.query(
+        'SELECT id FROM usuario WHERE REPLACE(REPLACE(dni, ".", ""), " ", "") = ? AND id != ?',
+        [cleanDni, userId]
+      );
+      if (existing && existing.length > 0) {
+        throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+      }
+
+      await pool.query('UPDATE usuario SET dni = ? WHERE id = ?', [cleanDni, userId]);
+      return { success: true, dni: cleanDni, message: 'DNI actualizado correctamente' };
+    } else {
+      const existing = store.usuarios.find(u => u.dni && String(u.dni).replace(/\D/g, '') === cleanDni && u.id !== userId);
+      if (existing) {
+        throw new AppError('El DNI ingresado ya se encuentra registrado por otro usuario en el sistema', 409);
+      }
+      const user = store.usuarios.find(u => u.id === userId);
+      if (!user) throw new AppError('Usuario no encontrado', 404);
+      user.dni = cleanDni;
+      return { success: true, dni: cleanDni, message: 'DNI actualizado correctamente' };
     }
   }
 

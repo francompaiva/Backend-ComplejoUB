@@ -49,6 +49,17 @@ export class AuthController {
       next(error);
     }
   }
+
+  async actualizarDni(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const rawDni = req.body.dni || req.body.documento;
+      const result = await authService.actualizarDni(userId, rawDni);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const authController = new AuthController();

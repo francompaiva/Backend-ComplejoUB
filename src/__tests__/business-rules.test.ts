@@ -242,12 +242,14 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       nombre: 'Usuario Malicioso',
       email: testEmail,
       contrasena: 'SecurityTest2026!',
+      dni: '77889900',
       rol: 'Administrador' as any,
     });
 
     const createdUser = store.usuarios.find(u => u.email === testEmail);
     assert.ok(createdUser);
     assert.equal(createdUser.rol, 'Cliente');
+    assert.equal(createdUser.dni, '77889900');
   });
 
   it('Inmutabilidad de Fixture: No se puede generar ni regenerar fixture si el torneo está en curso', async () => {
@@ -545,6 +547,64 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       (err: any) => {
         return err.statusCode === 400 && err.message.includes('7 u 8 dígitos');
       }
+    );
+  });
+
+  it('Registro: DNI obligatorio con validación de 7 u 8 dígitos', async () => {
+    // 1. DNI ausente debe fallar con 400
+    await assert.rejects(
+      async () => {
+        await authService.register({
+          nombre: 'Test Sin Dni',
+          email: 'sindni@test.com',
+          contrasena: 'Pass1234!',
+          dni: '',
+        });
+      },
+      (err: any) => err.statusCode === 400 && err.message.includes('DNI es obligatorio')
+    );
+
+    // 2. DNI corto (< 7 dígitos) debe fallar con 400
+    await assert.rejects(
+      async () => {
+        await authService.register({
+          nombre: 'Test Dni Corto',
+          email: 'dnicorto@test.com',
+          contrasena: 'Pass1234!',
+          dni: '12345',
+        });
+      },
+      (err: any) => err.statusCode === 400 && err.message.includes('7 u 8 dígitos')
+    );
+  });
+
+  it('Registro: Rechazar DNI duplicado si ya pertenece a otro usuario registrado (409 Conflict)', async () => {
+    // Lucas Díaz ya existe con DNI 40.123.456 (clean: 40123456)
+    await assert.rejects(
+      async () => {
+        await authService.register({
+          nombre: 'Usuario Duplicado',
+          email: 'duplicadodni@test.com',
+          contrasena: 'Pass1234!',
+          dni: '40123456',
+        });
+      },
+      (err: any) => err.statusCode === 409 && err.message.includes('ya se encuentra registrado')
+    );
+  });
+
+  it('Actualización de DNI: Usuario puede actualizar su DNI y se valida formato y unicidad', async () => {
+    // Usuario ID 6 (Julian Alvarez)
+    const res = await authService.actualizarDni(6, '33999888');
+    assert.equal(res.success, true);
+    assert.equal(res.dni, '33999888');
+
+    // Intentar actualizar a un DNI ya existente (40123456 de Lucas Díaz) debe fallar 409
+    await assert.rejects(
+      async () => {
+        await authService.actualizarDni(6, '40123456');
+      },
+      (err: any) => err.statusCode === 409 && err.message.includes('ya se encuentra registrado')
     );
   });
 });
