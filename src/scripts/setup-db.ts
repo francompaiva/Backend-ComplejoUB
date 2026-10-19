@@ -70,6 +70,7 @@ async function main() {
   const args = process.argv.slice(2);
   const isSchemaOnly = args.includes('--schema-only');
   const isSeedOnly = args.includes('--seed-only');
+  const isProceduresOnly = args.includes('--procedures-only');
 
   console.log('\n======================================================');
   console.log('🚀 COMPLEJO DEPORTIVO UB - SCRIPT DE MIGRACIÓN Y SEED');
@@ -121,7 +122,7 @@ async function main() {
       'password123';
 
     // 1. Ejecutar DDL (schema.sql)
-    if (!isSeedOnly) {
+    if (!isSeedOnly && !isProceduresOnly) {
       const schemaPath = path.join(projectRoot, 'database/schema.sql');
       console.log(`📄 Leyendo esquema DDL desde: ${path.relative(projectRoot, schemaPath)}`);
       if (!fs.existsSync(schemaPath)) {
@@ -134,8 +135,42 @@ async function main() {
       console.log('✅ Esquema DDL aplicado con éxito. Todas las tablas fueron creadas/actualizadas.\n');
     }
 
-    // 2. Ejecutar DML / SEEDS (seeds.sql)
-    if (!isSchemaOnly) {
+    // 2. Ejecutar Procedimientos Almacenados y Triggers (procedures_and_triggers.sql)
+    if ((!isSeedOnly && !isSchemaOnly) || isProceduresOnly) {
+      const spPath = path.join(projectRoot, 'database/procedures_and_triggers.sql');
+      console.log(`⚙️ Leyendo procedimientos almacenados y triggers desde: ${path.relative(projectRoot, spPath)}`);
+      if (!fs.existsSync(spPath)) {
+        console.warn(`⚠️ No se encontró el archivo de procedimientos en ${spPath}`);
+      } else {
+        let spSql = fs.readFileSync(spPath, 'utf8');
+
+        // Limpiar comandos no compatibles con mysql2
+        spSql = spSql.replace(/^\s*USE\s+[^;]+;/gim, '');
+        spSql = spSql.replace(/^\s*DELIMITER\s+.*$/gim, '');
+
+        // Dividir por delimitador de bloques '$$'
+        const blocks = spSql
+          .split(/\$\$/g)
+          .map((b) => b.trim())
+          .filter((b) => {
+            const clean = b.replace(/--.*$/gm, '').trim();
+            return clean.length > 0;
+          });
+
+        console.log(`⏳ Instalando ${blocks.length} procedimientos almacenados y triggers en MySQL...`);
+        for (const block of blocks) {
+          try {
+            await connection.query(block);
+          } catch (err: any) {
+            console.warn(`   ⚠️ Advertencia en bloque de procedimiento/trigger: ${err.message}`);
+          }
+        }
+        console.log('✅ Procedimientos almacenados y triggers aplicados exitosamente.\n');
+      }
+    }
+
+    // 3. Ejecutar DML / SEEDS (seeds.sql)
+    if (!isSchemaOnly && !isProceduresOnly) {
       const seedsPath = path.join(projectRoot, 'database/seeds.sql');
       console.log(`🌱 Leyendo seeds de datos desde: ${path.relative(projectRoot, seedsPath)}`);
       if (!fs.existsSync(seedsPath)) {

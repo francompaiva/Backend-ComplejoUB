@@ -2,7 +2,8 @@
 -- COMPLEJO DEPORTIVO UB - PROCEDIMIENTOS ALMACENADOS Y REGLAS DE NEGOCIO EN BD
 -- =============================================================================
 
-USE complejo_deportivo;
+-- NOTA: Omitir o ajustar USE según el nombre de la BD en MySQL/Railway/Render
+-- USE complejo_deportivo;
 
 DELIMITER $$
 
@@ -316,4 +317,24 @@ BEGIN
   END IF;
 END$$
 
+-- -----------------------------------------------------------------------------
+-- 7. TRIGGERS: CÁLCULO AUTOMÁTICO DE DIFERENCIA DE GOLES EN EQUIPO
+-- -----------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_calcular_diferencia_goles_insert$$
+CREATE TRIGGER trg_calcular_diferencia_goles_insert
+BEFORE INSERT ON equipo
+FOR EACH ROW
+BEGIN
+  SET NEW.diferencia_goles = NEW.goles_favor - NEW.goles_contra;
+END$$
+
+DROP TRIGGER IF EXISTS trg_calcular_diferencia_goles_update$$
+CREATE TRIGGER trg_calcular_diferencia_goles_update
+BEFORE UPDATE ON equipo
+FOR EACH ROW
+BEGIN
+  SET NEW.diferencia_goles = NEW.goles_favor - NEW.goles_contra;
+END$$
+
 DELIMITER ;
+

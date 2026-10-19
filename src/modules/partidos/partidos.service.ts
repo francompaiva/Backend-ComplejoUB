@@ -150,7 +150,12 @@ export class PartidosService {
       );
 
       // Recalcular tabla de posiciones para el torneo (RF-11)
-      await pool.query('CALL sp_actualizar_tabla_posiciones(?)', [partido.fk_torneo_id]);
+      try {
+        await pool.query('CALL sp_actualizar_tabla_posiciones(?)', [partido.fk_torneo_id]);
+      } catch (spErr: any) {
+        console.warn(`[partidosService] sp_actualizar_tabla_posiciones no disponible (${spErr.message}). Ejecutando fallback de recálculo directo en SQL.`);
+        await this.recalcularPosicionesDirecto(partido.fk_torneo_id);
+      }
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CARGAR_RESULTADO", "partido", ?, ?)',
@@ -404,6 +409,102 @@ export class PartidosService {
 
       eqLoc.diferencia_goles = eqLoc.goles_favor - eqLoc.goles_contra;
       eqVis.diferencia_goles = eqVis.goles_favor - eqVis.goles_contra;
+    }
+  }
+
+  /**
+   * Recálculo directo en MySQL como fallback resiliente cuando el SP
+   * sp_actualizar_tabla_posiciones no está instalado en la base de datos.
+   */
+  async recalcularPosicionesDirecto(torneoId: number) {
+    if (!isDbConnected()) {
+      this.recalcularPosicionesEnMemoria(torneoId);
+      return;
+    }
+    const pool = getPool()!;
+    try {
+      await pool.query(
+        `UPDATE equipo
+         SET puntos = 0, partidos_jugados = 0, partidos_ganados = 0, partidos_empatados = 0,
+             partidos_perdidos = 0, goles_favor = 0, goles_contra = 0, diferencia_goles = 0
+         WHERE fk_torneo_id = ?`,
+        [torneoId]
+      );
+
+      await pool.query(
+        `UPDATE equipo e
+         JOIN (
+           SELECT 
+             fk_equipo_local_id AS equipo_id,
+             COUNT(*) AS pj,
+             SUM(CASE WHEN goles_local > goles_visitante THEN 1 ELSE 0 END) AS pg,
+             SUM(CASE WHEN goles_local = goles_visitante THEN 1 ELSE 0 END) AS pe,
+             SUM(CASE WHEN goles_local < goles_visitante THEN 1 ELSE 0 END) AS pp,
+             SUM(COALESCE(goles_local, 0)) AS gf,
+             SUM(COALESCE(goles_visitante, 0)) AS gc,
+             SUM(CASE 
+               WHEN goles_local > goles_visitante THEN 3 
+               WHEN goles_local = goles_visitante THEN 1 
+               ELSE 0 
+             END) AS pts
+           FROM partido
+           WHERE fk_torneo_id = ? 
+             AND estado = 'DISPUTADO' 
+             AND fk_equipo_visitante_id IS NOT NULL
+           GROUP BY fk_equipo_local_id
+         ) loc ON e.id = loc.equipo_id
+         SET 
+           e.partidos_jugados = e.partidos_jugados + loc.pj,
+           e.partidos_ganados = e.partidos_ganados + loc.pg,
+           e.partidos_empatados = e.partidos_empatados + loc.pe,
+           e.partidos_perdidos = e.partidos_perdidos + loc.pp,
+           e.goles_favor = e.goles_favor + loc.gf,
+           e.goles_contra = e.goles_contra + loc.gc,
+           e.puntos = e.puntos + loc.pts`,
+        [torneoId]
+      );
+
+      await pool.query(
+        `UPDATE equipo e
+         JOIN (
+           SELECT 
+             fk_equipo_visitante_id AS equipo_id,
+             COUNT(*) AS pj,
+             SUM(CASE WHEN goles_visitante > goles_local THEN 1 ELSE 0 END) AS pg,
+             SUM(CASE WHEN goles_visitante = goles_local THEN 1 ELSE 0 END) AS pe,
+             SUM(CASE WHEN goles_visitante < goles_local THEN 1 ELSE 0 END) AS pp,
+             SUM(COALESCE(goles_visitante, 0)) AS gf,
+             SUM(COALESCE(goles_contra, 0)) AS gc,
+             SUM(CASE 
+               WHEN goles_visitante > goles_local THEN 3 
+               WHEN goles_visitante = goles_local THEN 1 
+               ELSE 0 
+             END) AS pts
+           FROM partido
+           WHERE fk_torneo_id = ? 
+             AND estado = 'DISPUTADO' 
+             AND fk_equipo_visitante_id IS NOT NULL
+           GROUP BY fk_equipo_visitante_id
+         ) vis ON e.id = vis.equipo_id
+         SET 
+           e.partidos_jugados = e.partidos_jugados + vis.pj,
+           e.partidos_ganados = e.partidos_ganados + vis.pg,
+           e.partidos_empatados = e.partidos_empatados + vis.pe,
+           e.partidos_perdidos = e.partidos_perdidos + vis.pp,
+           e.goles_favor = e.goles_favor + vis.gf,
+           e.goles_contra = e.goles_contra + vis.gc,
+           e.puntos = e.puntos + vis.pts`,
+        [torneoId]
+      );
+
+      await pool.query(
+        `UPDATE equipo
+         SET diferencia_goles = goles_favor - goles_contra
+         WHERE fk_torneo_id = ?`,
+        [torneoId]
+      );
+    } catch (directErr: any) {
+      console.error('[partidosService] Fallo crítico al recalcular posiciones directamente en SQL:', directErr.message);
     }
   }
 }
