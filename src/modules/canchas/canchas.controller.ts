@@ -25,7 +25,13 @@ export class CanchasController {
   async getDisponibilidad(req: Request, res: Response, next: NextFunction) {
     try {
       const id = parseInt(req.params.id, 10);
-      const fecha = (req.query.fecha as string) || new Date().toISOString().split('T')[0];
+      const fecha = (req.query.fecha as string) ||
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(new Date());
       const disponibilidad = await canchasService.getDisponibilidad(id, fecha);
       res.status(200).json({ success: true, data: disponibilidad });
     } catch (error) {
