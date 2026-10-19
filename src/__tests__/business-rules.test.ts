@@ -469,5 +469,36 @@ describe('Reglas de Negocio - Complejo Deportivo UB', () => {
       }
     );
   });
+
+  it('BUG-004: Prevenir reservas simultáneas duplicadas bajo alta concurrencia (409 Conflict)', async () => {
+    const canchaId = 1;
+    const fecha = '2026-12-28';
+    const hora = '18:00:00';
+
+    // Lanzar 5 solicitudes simultáneas para el mismo turno y cancha
+    const promesas = [
+      reservasService.createReserva(4, { canchaId, fecha, hora }),
+      reservasService.createReserva(5, { canchaId, fecha, hora }),
+      reservasService.createReserva(6, { canchaId, fecha, hora }),
+      reservasService.createReserva(4, { canchaId, fecha, hora }),
+      reservasService.createReserva(5, { canchaId, fecha, hora }),
+    ];
+
+    const resultados = await Promise.allSettled(promesas);
+
+    const exitosas = resultados.filter(r => r.status === 'fulfilled');
+    const rechazadas = resultados.filter(r => r.status === 'rejected');
+
+    assert.equal(exitosas.length, 1, 'Solo 1 reserva debe completarse exitosamente');
+    assert.equal(rechazadas.length, 4, 'Las reservas concurrentes excedentes deben ser rechazadas');
+
+    for (const r of rechazadas) {
+      if (r.status === 'rejected') {
+        const reason = r.reason as any;
+        assert.ok(reason.statusCode === 409 || reason.message.includes('ya no se encuentra disponible'));
+      }
+    }
+  });
 });
+
 

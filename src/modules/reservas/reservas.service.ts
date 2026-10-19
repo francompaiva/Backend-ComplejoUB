@@ -35,11 +35,41 @@ export function computeCancelTerms(reserva: any) {
   };
 }
 
+/**
+ * ConcurrencyMutex: Serializador asíncrono para prevenir condiciones de carrera
+ * en reservas concurrentes sobre la misma cancha/horario.
+ */
+class ConcurrencyMutex {
+  private queues: Map<string, Promise<void>> = new Map();
+
+  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const current = this.queues.get(key) || Promise.resolve();
+    let releaseLock!: () => void;
+    const next = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    this.queues.set(key, next);
+
+    try {
+      await current;
+      return await fn();
+    } finally {
+      releaseLock();
+      if (this.queues.get(key) === next) {
+        this.queues.delete(key);
+      }
+    }
+  }
+}
+
+export const reservationMutex = new ConcurrencyMutex();
+
 export class ReservasService {
   /**
    * RF-03: Reserva de turnos de una hora con seña del 30%
    * RF-05: Verificación de suspensión por inasistencias
    * RF-06: Verificación de disponibilidad y torneos de fin de semana
+   * BUG-004: Control de concurrencia y transaccionalidad con bloqueo pesimista
    */
   async createReserva(userId: number, data: CreateReservaDTO) {
     const { canchaId, fecha } = data;
@@ -58,137 +88,182 @@ export class ReservasService {
       throw new AppError('No es posible reservar un turno para una fecha u horario que ya ha transcurrido', 400);
     }
 
-    // 1. Verificar si el usuario está suspendido
-    if (isDbConnected()) {
-      const pool = getPool()!;
-      const [uRows]: any = await pool.query(
-        'SELECT estado_cuenta, suspension_hasta, inasistencias FROM usuario WHERE id = ?',
-        [userId]
-      );
-      if (uRows && uRows.length > 0) {
-        const u = uRows[0];
-        if (u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
+    // Control de concurrencia a nivel de cancha para serializar solicitudes simultáneas
+    return reservationMutex.runExclusive(`cancha-${canchaId}`, async () => {
+      if (isDbConnected()) {
+        const pool = getPool()!;
+        const connection = await pool.getConnection();
+
+        try {
+          await connection.beginTransaction();
+
+          // 1. Verificar si el usuario está suspendido
+          const [uRows]: any = await connection.query(
+            'SELECT estado_cuenta, suspension_hasta, inasistencias FROM usuario WHERE id = ? FOR UPDATE',
+            [userId]
+          );
+          if (uRows && uRows.length > 0) {
+            const u = uRows[0];
+            if (u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
+              if (new Date(u.suspension_hasta) > new Date()) {
+                throw new AppError(
+                  `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
+                  403
+                );
+              } else {
+                await connection.query(
+                  'UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?',
+                  [userId]
+                );
+              }
+            }
+          }
+
+          // 2. Bloqueo pesimista sobre la cancha en transacción exclusiva (FOR UPDATE)
+          const [canchaRows]: any = await connection.query(
+            'SELECT id, nombre, precio_hora, activa FROM cancha WHERE id = ? FOR UPDATE',
+            [canchaId]
+          );
+          if (!canchaRows || canchaRows.length === 0) {
+            throw new AppError('Cancha no encontrada', 404);
+          }
+          const cancha = canchaRows[0];
+          if (!cancha.activa) {
+            throw new AppError('La cancha seleccionada se encuentra inactiva', 400);
+          }
+
+          // 3. Verificar si el turno está reservado para torneo
+          const [partidoRows]: any = await connection.query(
+            'SELECT id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado != "SUSPENDIDO" FOR UPDATE',
+            [canchaId, cleanDateStr, cleanTimeStr]
+          );
+          if (partidoRows && partidoRows.length > 0) {
+            throw new AppError('El turno seleccionado ya no se encuentra disponible. Asignado a torneo oficial.', 409);
+          }
+
+          // 4. Verificar si existe reserva confirmada en ese turno
+          const [existingActive]: any = await connection.query(
+            'SELECT id FROM reserva WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = "CONFIRMADA" FOR UPDATE',
+            [canchaId, cleanDateStr, cleanTimeStr]
+          );
+          if (existingActive && existingActive.length > 0) {
+            throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+          }
+
+          const montoTotal = Number(cancha.precio_hora);
+          const montoSena = Math.round(montoTotal * 0.3);
+          const senaAbonada = true;
+
+          const [result]: any = await connection.query(
+            `INSERT INTO reserva (fk_usuario_id, fk_cancha_id, fecha, hora, monto_total, monto_sena, sena_abonada, estado)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')`,
+            [userId, canchaId, cleanDateStr, cleanTimeStr, montoTotal, montoSena, senaAbonada]
+          );
+          const reservaId = result.insertId;
+
+          // Crear notificación (RF-23)
+          await connection.query(
+            `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
+             VALUES (?, 'Reserva Confirmada', ?, 'ReservaConfirmada')`,
+            [userId, `Tu turno para ${cancha.nombre} el ${cleanDateStr} a las ${cleanTimeStr.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`]
+          );
+
+          await connection.commit();
+
+          return {
+            id: reservaId,
+            canchaId,
+            canchaNombre: cancha.nombre,
+            fecha: cleanDateStr,
+            hora: cleanTimeStr,
+            montoTotal,
+            montoSena,
+            senaAbonada,
+            estado: 'CONFIRMADA',
+          };
+        } catch (err) {
+          await connection.rollback();
+          throw err;
+        } finally {
+          connection.release();
+        }
+      } else {
+        // Modo in-memory store
+        const u = store.usuarios.find(user => user.id === userId);
+        if (u && u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
           if (new Date(u.suspension_hasta) > new Date()) {
             throw new AppError(
               `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
               403
             );
           } else {
-            // Cumplió con el período temporal de suspensión: reactivar cuenta y resetear inasistencias
-            await pool.query('UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?', [userId]);
+            u.estado_cuenta = 'Activa';
+            u.suspension_hasta = null;
+            u.inasistencias = 0;
           }
         }
-      }
-    } else {
-      const u = store.usuarios.find(user => user.id === userId);
-      if (u && u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
-        if (new Date(u.suspension_hasta) > new Date()) {
-          throw new AppError(
-            `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
-            403
-          );
-        } else {
-          // Cumplió con el período temporal de suspensión: reactivar cuenta y resetear inasistencias
-          u.estado_cuenta = 'Activa';
-          u.suspension_hasta = null;
-          u.inasistencias = 0;
+
+        const cancha = await canchasService.getById(canchaId);
+        if (!cancha.activa) {
+          throw new AppError('La cancha seleccionada se encuentra inactiva', 400);
         }
+
+        const disponibilidad = await canchasService.getDisponibilidad(canchaId, cleanDateStr);
+        if (disponibilidad.bloqueadoPorTorneo) {
+          throw new AppError(disponibilidad.motivoBloqueo, 400);
+        }
+
+        const slot = disponibilidad.slots.find(s => s.horaCompleta.startsWith(cleanTimeStr.slice(0, 5)));
+        if (!slot || slot.estado !== 'Libre') {
+          throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+        }
+
+        // Doble verificación directa en store
+        const alreadyBooked = store.reservas.some(
+          r => r.fk_cancha_id === canchaId && r.fecha === cleanDateStr && r.hora.startsWith(cleanTimeStr.slice(0, 5)) && r.estado === 'CONFIRMADA'
+        );
+        if (alreadyBooked) {
+          throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+        }
+
+        const montoTotal = Number(cancha.precio_hora);
+        const montoSena = Math.round(montoTotal * 0.3);
+        const senaAbonada = true;
+
+        const newId = store.reservas.length > 0 ? Math.max(...store.reservas.map(r => r.id)) + 1 : 1;
+        const newReserva: ReservaModel = {
+          id: newId,
+          fk_usuario_id: userId,
+          fk_cancha_id: canchaId,
+          fecha: cleanDateStr,
+          hora: cleanTimeStr,
+          monto_total: montoTotal,
+          monto_sena: montoSena,
+          sena_abonada: senaAbonada,
+          estado: 'CONFIRMADA',
+          devolucion_sena: null,
+          asistencia_confirmada: null,
+          created_at: new Date().toISOString(),
+        };
+        store.reservas.push(newReserva);
+
+        // Notificación
+        store.notificaciones.push({
+          id: store.notificaciones.length + 1,
+          fk_usuario_id: userId,
+          titulo: 'Reserva Confirmada',
+          mensaje: `Tu turno para ${cancha.nombre} el ${cleanDateStr} a las ${cleanTimeStr.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`,
+          tipo: 'ReservaConfirmada',
+          leida: false,
+          created_at: new Date().toISOString(),
+        });
+
+        return {
+          ...newReserva,
+          canchaNombre: cancha.nombre,
+        };
       }
-    }
-
-    // 2. Obtener cancha y tarifa
-    const cancha = await canchasService.getById(canchaId);
-    if (!cancha.activa) {
-      throw new AppError('La cancha seleccionada se encuentra inactiva', 400);
-    }
-
-    // 3. Verificar disponibilidad y regla RF-06 de torneos fin de semana
-    const disponibilidad = await canchasService.getDisponibilidad(canchaId, fecha);
-    if (disponibilidad.bloqueadoPorTorneo) {
-      throw new AppError(disponibilidad.motivoBloqueo, 400);
-    }
-
-    const slot = disponibilidad.slots.find(s => s.horaCompleta.startsWith(hora.slice(0, 5)));
-    if (!slot || slot.estado !== 'Libre') {
-      throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
-    }
-
-    // 4. Cálculo de tarifa fija y 30% de seña obligatoria
-    const montoTotal = Number(cancha.precio_hora);
-    const montoSena = Math.round(montoTotal * 0.3); // 30% de seña
-    const senaAbonada = true; // Simulación de pago aprobada
-
-    if (isDbConnected()) {
-      const pool = getPool()!;
-
-      // Doble verificación defensiva en MySQL: Solo bloquear si existe una reserva CONFIRMADA (permite re-reservar turnos cancelados)
-      const [existingActive]: any = await pool.query(
-        'SELECT id FROM reserva WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = "CONFIRMADA"',
-        [canchaId, fecha, hora]
-      );
-      if (existingActive && existingActive.length > 0) {
-        throw new AppError('El turno seleccionado ya se encuentra reservado por otro usuario.', 409);
-      }
-
-      const [result]: any = await pool.query(
-        `INSERT INTO reserva (fk_usuario_id, fk_cancha_id, fecha, hora, monto_total, monto_sena, sena_abonada, estado)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')`,
-        [userId, canchaId, fecha, hora, montoTotal, montoSena, senaAbonada]
-      );
-      const reservaId = result.insertId;
-
-      // Crear notificación (RF-23)
-      await pool.query(
-        `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
-         VALUES (?, 'Reserva Confirmada', ?, 'ReservaConfirmada')`,
-        [userId, `Tu turno para ${cancha.nombre} el ${fecha} a las ${hora.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`]
-      );
-
-      return {
-        id: reservaId,
-        canchaId,
-        canchaNombre: cancha.nombre,
-        fecha,
-        hora,
-        montoTotal,
-        montoSena,
-        senaAbonada,
-        estado: 'CONFIRMADA',
-      };
-    } else {
-      const newId = store.reservas.length > 0 ? Math.max(...store.reservas.map(r => r.id)) + 1 : 1;
-      const newReserva: ReservaModel = {
-        id: newId,
-        fk_usuario_id: userId,
-        fk_cancha_id: canchaId,
-        fecha,
-        hora,
-        monto_total: montoTotal,
-        monto_sena: montoSena,
-        sena_abonada: senaAbonada,
-        estado: 'CONFIRMADA',
-        devolucion_sena: null,
-        asistencia_confirmada: null,
-        created_at: new Date().toISOString(),
-      };
-      store.reservas.push(newReserva);
-
-      // Notificación
-      store.notificaciones.push({
-        id: store.notificaciones.length + 1,
-        fk_usuario_id: userId,
-        titulo: 'Reserva Confirmada',
-        mensaje: `Tu turno para ${cancha.nombre} el ${fecha} a las ${hora.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`,
-        tipo: 'ReservaConfirmada',
-        leida: false,
-        created_at: new Date().toISOString(),
-      });
-
-      return {
-        ...newReserva,
-        canchaNombre: cancha.nombre,
-      };
-    }
+    });
   }
 
   /**
