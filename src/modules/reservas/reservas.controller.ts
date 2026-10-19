@@ -48,6 +48,17 @@ export class ReservasController {
     }
   }
 
+  async confirmarAsistencia(req: Request, res: Response, next: NextFunction) {
+    try {
+      const reservaId = parseInt(req.params.id, 10);
+      const adminId = req.user!.id;
+      const result = await reservasService.confirmarAsistencia(reservaId, adminId);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getMisReservas(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;

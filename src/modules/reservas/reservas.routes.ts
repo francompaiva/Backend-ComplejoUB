@@ -25,5 +25,8 @@ router.get('/', requireRole('Administrador'), (req, res, next) => reservasContro
 router.put('/:id/inasistencia', requireRole('Administrador'), (req, res, next) =>
   reservasController.registrarInasistencia(req, res, next)
 );
+router.put('/:id/asistencia', requireRole('Administrador'), (req, res, next) =>
+  reservasController.confirmarAsistencia(req, res, next)
+);
 
 export default router;
