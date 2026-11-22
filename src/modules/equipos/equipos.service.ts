@@ -163,6 +163,34 @@ export class EquiposService {
       throw new AppError('Las inscripciones para este torneo ya no se encuentran abiertas', 400);
     }
 
+
+    // Evitar inscripciones cuando el torneo ya comenzó o terminó.
+    // Usamos la fecha de Argentina para no depender del horario del servidor.
+    const hoyArgentina = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+
+    const soloFecha = (valor: unknown): string => {
+      if (valor instanceof Date) {
+        return valor.toISOString().slice(0, 10);
+      }
+      return valor ? String(valor).slice(0, 10) : '';
+    };
+
+    const inicio = soloFecha(torneo.fecha_inicio);
+    const fin = soloFecha(torneo.fecha_fin);
+
+    if ((inicio && hoyArgentina >= inicio) || (fin && hoyArgentina > fin)) {
+      throw new AppError(
+        'No se puede inscribir un equipo en un torneo que ya comenzó o finalizó',
+        400
+      );
+    }
+
+
     // Verificar cupo de equipos
     const equiposActuales = await this.getAll(torneoId);
     if (equiposActuales.length >= torneo.max_equipos) {
