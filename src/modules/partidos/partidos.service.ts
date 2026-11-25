@@ -122,13 +122,34 @@ export class PartidosService {
    * RF-11: Actualización automática de posiciones (PTS: 3 vic, 1 emp, 0 der; GF, GC, DG)
    * RF-19: Estado pasa a 'DISPUTADO'
    */
-  async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: string, data: CargarResultadoDTO) {
-    const partido = await this.getById(partidoId);
+  
+async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: string, data: CargarResultadoDTO) {
+  // Nunca confirmar un acta guardada solamente en memoria.
+  if (!isDbConnected()) {
+    throw new AppError(
+      'La base de datos no está disponible. El acta no fue guardada.',
+      503
+    );
+  }
+
+  const partido = await this.getById(partidoId);
+
 
     // Validar autorización: Solo el Árbitro asignado o un Administrador pueden cargar el resultado
     if (usuarioRol === 'Arbitro' && partido.fk_arbitro_id !== usuarioId) {
       throw new AppError('No tienes permiso para registrar resultados de un partido que no tienes asignado', 403);
     }
+
+
+    // El árbitro solamente puede cerrar partidos programados.
+    // La corrección de resultados ya cerrados queda para Administración.
+    if (usuarioRol === 'Arbitro' && partido.estado !== 'PROGRAMADO') {
+      throw new AppError(
+        'Este partido ya fue cerrado o no está programado. Solicitá la corrección al administrador.',
+        409
+      );
+    }
+
 
     if (partido.fk_equipo_visitante_id === null) {
       throw new AppError('No se puede cargar resultado a un partido de Fecha Libre', 400);
