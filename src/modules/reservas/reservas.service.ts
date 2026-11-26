@@ -1,32 +1,45 @@
-import { AppError } from '../../middlewares/error.middleware.js';
-import { isDbConnected, getPool } from '../../config/database.js';
-import { store, ReservaModel, SancionModel, NotificacionModel, AuditLogModel } from '../../config/in-memory-store.js';
-import { canchasService } from '../canchas/canchas.service.js';
+import { AppError } from "../../middlewares/error.middleware.js";
+import { isDbConnected, getPool } from "../../config/database.js";
+import {
+  store,
+  ReservaModel,
+  SancionModel,
+  NotificacionModel,
+  AuditLogModel,
+} from "../../config/in-memory-store.js";
+import { canchasService } from "../canchas/canchas.service.js";
 
 export interface CreateReservaDTO {
   canchaId: number;
   fecha: string; // YYYY-MM-DD
-  hora: string;  // HH:00:00 o HH:00
+  hora: string; // HH:00:00 o HH:00
 }
 
 /**
  * Cálculo centralizado en backend de las condiciones y términos de cancelación de reservas (>24hs).
  */
 export function computeCancelTerms(reserva: any) {
-  const dateStr = reserva.fecha instanceof Date
-    ? reserva.fecha.toISOString().split('T')[0]
-    : String(reserva.fecha).split('T')[0];
-  const horaStr = reserva.hora ? (reserva.hora.length === 5 ? `${reserva.hora}:00` : String(reserva.hora)) : '00:00:00';
+  const dateStr =
+    reserva.fecha instanceof Date
+      ? reserva.fecha.toISOString().split("T")[0]
+      : String(reserva.fecha).split("T")[0];
+  const horaStr = reserva.hora
+    ? reserva.hora.length === 5
+      ? `${reserva.hora}:00`
+      : String(reserva.hora)
+    : "00:00:00";
   const cleanTime = horaStr.length === 5 ? `${horaStr}:00` : horaStr;
   // Complejo UB opera en zona horaria de Argentina (UTC-3).
   // Se evalúa con offset explícito para sincronía entre servidores cloud (UTC) y clientes.
   const reservaDateTime = new Date(`${dateStr}T${cleanTime}-03:00`);
   const now = new Date();
-  const diffHours = (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+  const diffHours =
+    (reservaDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
-  const aplicaDevolucion = reserva.estado === 'CANCELADA'
-    ? Boolean(reserva.devolucion_sena)
-    : diffHours > 24;
+  const aplicaDevolucion =
+    reserva.estado === "CANCELADA"
+      ? Boolean(reserva.devolucion_sena)
+      : diffHours > 24;
 
   return {
     diffHours,
@@ -78,14 +91,17 @@ export class ReservasService {
 
     // Validar que la fecha y hora seleccionada no pertenezca al pasado
     // Se utiliza la zona horaria oficial del Complejo Deportivo UB (Argentina: UTC-3)
-    const cleanDateStr = fecha.includes('T') ? fecha.split('T')[0] : fecha;
+    const cleanDateStr = fecha.includes("T") ? fecha.split("T")[0] : fecha;
     const cleanTimeStr = hora.length === 5 ? `${hora}:00` : hora;
     const turnoDate = new Date(`${cleanDateStr}T${cleanTimeStr}-03:00`);
 
     // Tolerancia de 5 minutos de gracia por latencia de red y llenado de datos de pago
     const toleranciaGraciaMs = 5 * 60 * 1000;
     if (turnoDate.getTime() + toleranciaGraciaMs <= Date.now()) {
-      throw new AppError('No es posible reservar un turno para una fecha u horario que ya ha transcurrido', 400);
+      throw new AppError(
+        "No es posible reservar un turno para una fecha u horario que ya ha transcurrido",
+        400,
+      );
     }
 
     // Control de concurrencia a nivel de cancha para serializar solicitudes simultáneas
@@ -99,21 +115,21 @@ export class ReservasService {
 
           // 1. Verificar si el usuario está suspendido
           const [uRows]: any = await connection.query(
-            'SELECT estado_cuenta, suspension_hasta, inasistencias FROM usuario WHERE id = ? FOR UPDATE',
-            [userId]
+            "SELECT estado_cuenta, suspension_hasta, inasistencias FROM usuario WHERE id = ? FOR UPDATE",
+            [userId],
           );
           if (uRows && uRows.length > 0) {
             const u = uRows[0];
-            if (u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
+            if (u.estado_cuenta === "Suspendida" && u.suspension_hasta) {
               if (new Date(u.suspension_hasta) > new Date()) {
                 throw new AppError(
                   `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
-                  403
+                  403,
                 );
               } else {
                 await connection.query(
                   'UPDATE usuario SET estado_cuenta = "Activa", suspension_hasta = NULL, inasistencias = 0 WHERE id = ?',
-                  [userId]
+                  [userId],
                 );
               }
             }
@@ -121,33 +137,42 @@ export class ReservasService {
 
           // 2. Bloqueo pesimista sobre la cancha en transacción exclusiva (FOR UPDATE)
           const [canchaRows]: any = await connection.query(
-            'SELECT id, nombre, precio_hora, activa FROM cancha WHERE id = ? FOR UPDATE',
-            [canchaId]
+            "SELECT id, nombre, precio_hora, activa FROM cancha WHERE id = ? FOR UPDATE",
+            [canchaId],
           );
           if (!canchaRows || canchaRows.length === 0) {
-            throw new AppError('Cancha no encontrada', 404);
+            throw new AppError("Cancha no encontrada", 404);
           }
           const cancha = canchaRows[0];
           if (!cancha.activa) {
-            throw new AppError('La cancha seleccionada se encuentra inactiva', 400);
+            throw new AppError(
+              "La cancha seleccionada se encuentra inactiva",
+              400,
+            );
           }
 
           // 3. Verificar si el turno está reservado para torneo
           const [partidoRows]: any = await connection.query(
             'SELECT id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado != "SUSPENDIDO" FOR UPDATE',
-            [canchaId, cleanDateStr, cleanTimeStr]
+            [canchaId, cleanDateStr, cleanTimeStr],
           );
           if (partidoRows && partidoRows.length > 0) {
-            throw new AppError('El turno seleccionado ya no se encuentra disponible. Asignado a torneo oficial.', 409);
+            throw new AppError(
+              "El turno seleccionado ya no se encuentra disponible. Asignado a torneo oficial.",
+              409,
+            );
           }
 
           // 4. Verificar si existe reserva confirmada en ese turno
           const [existingActive]: any = await connection.query(
             'SELECT id FROM reserva WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = "CONFIRMADA" FOR UPDATE',
-            [canchaId, cleanDateStr, cleanTimeStr]
+            [canchaId, cleanDateStr, cleanTimeStr],
           );
           if (existingActive && existingActive.length > 0) {
-            throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+            throw new AppError(
+              "El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.",
+              409,
+            );
           }
 
           const montoTotal = Number(cancha.precio_hora);
@@ -157,7 +182,15 @@ export class ReservasService {
           const [result]: any = await connection.query(
             `INSERT INTO reserva (fk_usuario_id, fk_cancha_id, fecha, hora, monto_total, monto_sena, sena_abonada, estado)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')`,
-            [userId, canchaId, cleanDateStr, cleanTimeStr, montoTotal, montoSena, senaAbonada]
+            [
+              userId,
+              canchaId,
+              cleanDateStr,
+              cleanTimeStr,
+              montoTotal,
+              montoSena,
+              senaAbonada,
+            ],
           );
           const reservaId = result.insertId;
 
@@ -165,7 +198,10 @@ export class ReservasService {
           await connection.query(
             `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
              VALUES (?, 'Reserva Confirmada', ?, 'ReservaConfirmada')`,
-            [userId, `Tu turno para ${cancha.nombre} el ${cleanDateStr} a las ${cleanTimeStr.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`]
+            [
+              userId,
+              `Tu turno para ${cancha.nombre} el ${cleanDateStr} a las ${cleanTimeStr.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`,
+            ],
           );
 
           await connection.commit();
@@ -179,7 +215,7 @@ export class ReservasService {
             montoTotal,
             montoSena,
             senaAbonada,
-            estado: 'CONFIRMADA',
+            estado: "CONFIRMADA",
           };
         } catch (err) {
           await connection.rollback();
@@ -189,15 +225,15 @@ export class ReservasService {
         }
       } else {
         // Modo in-memory store
-        const u = store.usuarios.find(user => user.id === userId);
-        if (u && u.estado_cuenta === 'Suspendida' && u.suspension_hasta) {
+        const u = store.usuarios.find((user) => user.id === userId);
+        if (u && u.estado_cuenta === "Suspendida" && u.suspension_hasta) {
           if (new Date(u.suspension_hasta) > new Date()) {
             throw new AppError(
               `Usuario suspendido hasta el ${new Date(u.suspension_hasta).toLocaleDateString()} por acumulación de inasistencias`,
-              403
+              403,
             );
           } else {
-            u.estado_cuenta = 'Activa';
+            u.estado_cuenta = "Activa";
             u.suspension_hasta = null;
             u.inasistencias = 0;
           }
@@ -205,32 +241,53 @@ export class ReservasService {
 
         const cancha = await canchasService.getById(canchaId);
         if (!cancha.activa) {
-          throw new AppError('La cancha seleccionada se encuentra inactiva', 400);
+          throw new AppError(
+            "La cancha seleccionada se encuentra inactiva",
+            400,
+          );
         }
 
-        const disponibilidad = await canchasService.getDisponibilidad(canchaId, cleanDateStr);
+        const disponibilidad = await canchasService.getDisponibilidad(
+          canchaId,
+          cleanDateStr,
+        );
         if (disponibilidad.bloqueadoPorTorneo) {
           throw new AppError(disponibilidad.motivoBloqueo, 400);
         }
 
-        const slot = disponibilidad.slots.find(s => s.horaCompleta.startsWith(cleanTimeStr.slice(0, 5)));
-        if (!slot || slot.estado !== 'Libre') {
-          throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+        const slot = disponibilidad.slots.find((s) =>
+          s.horaCompleta.startsWith(cleanTimeStr.slice(0, 5)),
+        );
+        if (!slot || slot.estado !== "Libre") {
+          throw new AppError(
+            "El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.",
+            409,
+          );
         }
 
         // Doble verificación directa en store
         const alreadyBooked = store.reservas.some(
-          r => r.fk_cancha_id === canchaId && r.fecha === cleanDateStr && r.hora.startsWith(cleanTimeStr.slice(0, 5)) && r.estado === 'CONFIRMADA'
+          (r) =>
+            r.fk_cancha_id === canchaId &&
+            r.fecha === cleanDateStr &&
+            r.hora.startsWith(cleanTimeStr.slice(0, 5)) &&
+            r.estado === "CONFIRMADA",
         );
         if (alreadyBooked) {
-          throw new AppError('El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.', 409);
+          throw new AppError(
+            "El turno seleccionado ya no se encuentra disponible. Puedes anotarte en la lista de espera.",
+            409,
+          );
         }
 
         const montoTotal = Number(cancha.precio_hora);
         const montoSena = Math.round(montoTotal * 0.3);
         const senaAbonada = true;
 
-        const newId = store.reservas.length > 0 ? Math.max(...store.reservas.map(r => r.id)) + 1 : 1;
+        const newId =
+          store.reservas.length > 0
+            ? Math.max(...store.reservas.map((r) => r.id)) + 1
+            : 1;
         const newReserva: ReservaModel = {
           id: newId,
           fk_usuario_id: userId,
@@ -240,7 +297,7 @@ export class ReservasService {
           monto_total: montoTotal,
           monto_sena: montoSena,
           sena_abonada: senaAbonada,
-          estado: 'CONFIRMADA',
+          estado: "CONFIRMADA",
           devolucion_sena: null,
           asistencia_confirmada: null,
           created_at: new Date().toISOString(),
@@ -251,9 +308,9 @@ export class ReservasService {
         store.notificaciones.push({
           id: store.notificaciones.length + 1,
           fk_usuario_id: userId,
-          titulo: 'Reserva Confirmada',
+          titulo: "Reserva Confirmada",
           mensaje: `Tu turno para ${cancha.nombre} el ${cleanDateStr} a las ${cleanTimeStr.slice(0, 5)} hs ha sido reservado. Seña abonada: $${montoSena.toLocaleString()}.`,
-          tipo: 'ReservaConfirmada',
+          tipo: "ReservaConfirmada",
           leida: false,
           created_at: new Date().toISOString(),
         });
@@ -270,40 +327,50 @@ export class ReservasService {
    * RF-04: Cancelación de reservas con regla de más de 24 horas para devolución de seña
    * RF-24: Reactivación y notificación a usuarios en lista de espera
    */
-  async cancelarReserva(reservaId: number, userId: number, userRol: string, motivo?: string) {
+  async cancelarReserva(
+    reservaId: number,
+    userId: number,
+    userRol: string,
+    motivo?: string,
+  ) {
     let reserva: any = null;
 
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        'SELECT r.*, c.nombre as cancha_nombre FROM reserva r JOIN cancha c ON r.fk_cancha_id = c.id WHERE r.id = ?',
-        [reservaId]
+        "SELECT r.*, c.nombre as cancha_nombre FROM reserva r JOIN cancha c ON r.fk_cancha_id = c.id WHERE r.id = ?",
+        [reservaId],
       );
-      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
+      if (!rows || rows.length === 0)
+        throw new AppError("Reserva no encontrada", 404);
       reserva = rows[0];
     } else {
-      reserva = store.reservas.find(r => r.id === reservaId);
-      if (!reserva) throw new AppError('Reserva no encontrada', 404);
-      const c = store.canchas.find(ca => ca.id === reserva.fk_cancha_id);
-      reserva.cancha_nombre = c?.nombre || 'Cancha';
+      reserva = store.reservas.find((r) => r.id === reservaId);
+      if (!reserva) throw new AppError("Reserva no encontrada", 404);
+      const c = store.canchas.find((ca) => ca.id === reserva.fk_cancha_id);
+      reserva.cancha_nombre = c?.nombre || "Cancha";
     }
 
     // Validar autorización: Solo el dueño de la reserva o un Administrador pueden cancelarla
-    if (reserva.fk_usuario_id !== userId && userRol !== 'Administrador') {
-      throw new AppError('No tienes autorización para cancelar esta reserva', 403);
+    if (reserva.fk_usuario_id !== userId && userRol !== "Administrador") {
+      throw new AppError(
+        "No tienes autorización para cancelar esta reserva",
+        403,
+      );
     }
 
-    if (reserva.estado === 'CANCELADA') {
-      throw new AppError('La reserva ya se encuentra cancelada', 400);
+    if (reserva.estado === "CANCELADA") {
+      throw new AppError("La reserva ya se encuentra cancelada", 400);
     }
 
-    const { diffHours, horasAnticipacion, aplicaDevolucion } = computeCancelTerms(reserva);
+    const { diffHours, horasAnticipacion, aplicaDevolucion } =
+      computeCancelTerms(reserva);
 
     if (isDbConnected()) {
       const pool = getPool()!;
       await pool.query(
         'UPDATE reserva SET estado = "CANCELADA", devolucion_sena = ?, notas_cancelacion = ? WHERE id = ?',
-        [aplicaDevolucion, motivo || 'Cancelada por el usuario', reservaId]
+        [aplicaDevolucion, motivo || "Cancelada por el usuario", reservaId],
       );
 
       // Notificar al usuario titular
@@ -314,54 +381,64 @@ export class ReservasService {
       await pool.query(
         `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
          VALUES (?, 'Reserva Cancelada', ?, 'ReservaCancelada')`,
-        [reserva.fk_usuario_id, mensajeReintegro]
+        [reserva.fk_usuario_id, mensajeReintegro],
       );
 
       // RF-24: Verificar si hay usuarios en lista de espera para notificar al primero
       const [esperaRows]: any = await pool.query(
         'SELECT * FROM lista_espera WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = "PENDIENTE" ORDER BY created_at ASC LIMIT 1',
-        [reserva.fk_cancha_id, reserva.fecha, reserva.hora]
+        [reserva.fk_cancha_id, reserva.fecha, reserva.hora],
       );
       if (esperaRows && esperaRows.length > 0) {
         const primero = esperaRows[0];
-        await pool.query('UPDATE lista_espera SET estado = "NOTIFICADO" WHERE id = ?', [primero.id]);
+        await pool.query(
+          'UPDATE lista_espera SET estado = "NOTIFICADO" WHERE id = ?',
+          [primero.id],
+        );
         await pool.query(
           `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
            VALUES (?, '¡Turno Liberado en Lista de Espera!', ?, 'ListaEsperaDisponible')`,
-          [primero.fk_usuario_id, `Se liberó el turno para ${reserva.cancha_nombre} el ${reserva.fecha} a las ${reserva.hora.slice(0, 5)} hs. Tienes prioridad para reservar.`]
+          [
+            primero.fk_usuario_id,
+            `Se liberó el turno para ${reserva.cancha_nombre} el ${reserva.fecha} a las ${reserva.hora.slice(0, 5)} hs. Tienes prioridad para reservar.`,
+          ],
         );
       }
     } else {
-      reserva.estado = 'CANCELADA';
+      reserva.estado = "CANCELADA";
       reserva.devolucion_sena = aplicaDevolucion;
       reserva.notas_cancelacion = motivo;
 
       const mensajeReintegro = aplicaDevolucion
         ? `Cancelaste con más de 24hs de antelación. Se acreditó la devolución de la seña ($${reserva.monto_sena.toLocaleString()}).`
-        : 'Cancelaste con menos de 24hs de anticipación. No aplica reintegro de seña.';
+        : "Cancelaste con menos de 24hs de anticipación. No aplica reintegro de seña.";
 
       store.notificaciones.push({
         id: store.notificaciones.length + 1,
         fk_usuario_id: reserva.fk_usuario_id,
-        titulo: 'Reserva Cancelada',
+        titulo: "Reserva Cancelada",
         mensaje: mensajeReintegro,
-        tipo: 'ReservaCancelada',
+        tipo: "ReservaCancelada",
         leida: false,
         created_at: new Date().toISOString(),
       });
 
       // Lista de espera
       const espera = store.listasEspera.find(
-        l => l.fk_cancha_id === reserva.fk_cancha_id && l.fecha === reserva.fecha && l.hora === reserva.hora && l.estado === 'PENDIENTE'
+        (l) =>
+          l.fk_cancha_id === reserva.fk_cancha_id &&
+          l.fecha === reserva.fecha &&
+          l.hora === reserva.hora &&
+          l.estado === "PENDIENTE",
       );
       if (espera) {
-        espera.estado = 'NOTIFICADO';
+        espera.estado = "NOTIFICADO";
         store.notificaciones.push({
           id: store.notificaciones.length + 1,
           fk_usuario_id: espera.fk_usuario_id,
-          titulo: '¡Turno Liberado en Lista de Espera!',
+          titulo: "¡Turno Liberado en Lista de Espera!",
           mensaje: `Se liberó el turno en ${reserva.cancha_nombre} para el ${reserva.fecha} a las ${reserva.hora.slice(0, 5)} hs.`,
-          tipo: 'ListaEsperaDisponible',
+          tipo: "ListaEsperaDisponible",
           leida: false,
           created_at: new Date().toISOString(),
         });
@@ -370,13 +447,13 @@ export class ReservasService {
 
     return {
       reservaId,
-      estado: 'CANCELADA',
+      estado: "CANCELADA",
       aplicaDevolucion,
       horasAnticipacion: Math.round(diffHours),
       montoSenaDevuelto: aplicaDevolucion ? reserva.monto_sena : 0,
       mensaje: aplicaDevolucion
-        ? 'Reserva cancelada con éxito. Aplica devolución del 100% de la seña por anticipación > 24hs.'
-        : 'Reserva cancelada con éxito. No aplica devolución de seña (menos de 24hs de anticipación).',
+        ? "Reserva cancelada con éxito. Aplica devolución del 100% de la seña por anticipación > 24hs."
+        : "Reserva cancelada con éxito. No aplica devolución de seña (menos de 24hs de anticipación).",
     };
   }
 
@@ -385,143 +462,155 @@ export class ReservasService {
    * Si un cliente acumula 3 inasistencias consecutivas -> suspensión de 2 semanas
    */
   async registrarInasistencia(reservaId: number, adminId: number) {
-    let reserva: any = null;
-
-    if (isDbConnected()) {
-      const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT * FROM reserva WHERE id = ?', [reservaId]);
-      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
-      reserva = rows[0];
-
-      // Actualizar reserva
-      await pool.query(
-        'UPDATE reserva SET estado = "INASISTENCIA", asistencia_confirmada = false, devolucion_sena = false WHERE id = ?',
-        [reservaId]
+    if (!isDbConnected()) {
+      throw new AppError(
+        "La base de datos no está disponible. No se registró la inasistencia.",
+        503,
       );
+    }
 
-      // Incrementar contador de inasistencias
-      await pool.query('UPDATE usuario SET inasistencias = inasistencias + 1 WHERE id = ?', [reserva.fk_usuario_id]);
+    const connection = await getPool()!.getConnection();
+    try {
+      await connection.beginTransaction();
+      // Bloquear la reserva evita registrar dos veces la misma ausencia.
+      const [rows]: any = await connection.query(
+        "SELECT * FROM reserva WHERE id = ? FOR UPDATE",
+        [reservaId],
+      );
+      if (!rows.length) throw new AppError("Reserva no encontrada.", 404);
+      const reserva = rows[0];
+      if (reserva.estado !== "CONFIRMADA") {
+        throw new AppError("Esta reserva ya fue procesada o cancelada.", 409);
+      }
 
-      const [userRows]: any = await pool.query('SELECT inasistencias, nombre FROM usuario WHERE id = ?', [reserva.fk_usuario_id]);
-      const currentInasistencias = userRows[0].inasistencias;
-      let suspendido = false;
-
-      if (currentInasistencias >= 3) {
-        suspendido = true;
-        await pool.query(
-          'UPDATE usuario SET estado_cuenta = "Suspendida", suspension_hasta = DATE_ADD(NOW(), INTERVAL 14 DAY) WHERE id = ?',
-          [reserva.fk_usuario_id]
-        );
-        await pool.query(
-          'INSERT INTO sancion (fk_usuario_id, fk_partido_id, tipo_sancion, descripcion, fecha_sancion, fk_creado_por_id) VALUES (?, NULL, "Suspensión 2 semanas", "Suspensión automática por 3 inasistencias consecutivas.", NOW(), ?)',
-          [reserva.fk_usuario_id, adminId]
-        );
-        await pool.query(
-          'INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo) VALUES (?, "Cuenta Suspendida", "Has acumulado 3 inasistencias sin aviso. Tu cuenta ha sido suspendida para reservas durante 2 semanas.", "Sancion")',
-          [reserva.fk_usuario_id]
+      // Solo después de finalizar el turno de una hora, en horario argentino.
+      const fecha =
+        reserva.fecha instanceof Date
+          ? reserva.fecha.toISOString().slice(0, 10)
+          : String(reserva.fecha).slice(0, 10);
+      const hora = String(reserva.hora).slice(0, 8);
+      const inicio = Date.parse(`${fecha}T${hora}-03:00`);
+      if (!Number.isFinite(inicio) || Date.now() < inicio + 60 * 60 * 1000) {
+        throw new AppError(
+          "La reserva todavía no finalizó. No se puede registrar inasistencia.",
+          409,
         );
       }
 
-      await pool.query(
-        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "REGISTRAR_INASISTENCIA", "reserva", ?, ?)',
-        [adminId, reservaId, JSON.stringify({ usuarioId: reserva.fk_usuario_id, totalInasistencias: currentInasistencias, suspendido })]
+      const [usuarios]: any = await connection.query(
+        "SELECT inasistencias FROM usuario WHERE id = ? FOR UPDATE",
+        [reserva.fk_usuario_id],
+      );
+      if (!usuarios.length) throw new AppError("Usuario no encontrado.", 404);
+      const total = Number(usuarios[0].inasistencias) + 1;
+      const suspendido = total === 3;
+
+      await connection.query(
+        `UPDATE reserva SET estado = 'INASISTENCIA',
+          asistencia_confirmada = 0, devolucion_sena = 0 WHERE id = ?`,
+        [reservaId],
+      );
+      await connection.query(
+        "UPDATE usuario SET inasistencias = ? WHERE id = ?",
+        [total, reserva.fk_usuario_id],
       );
 
+      if (suspendido) {
+        await connection.query(
+          `UPDATE usuario SET estado_cuenta = 'Suspendida',
+            suspension_hasta = DATE_ADD(NOW(), INTERVAL 14 DAY) WHERE id = ?`,
+          [reserva.fk_usuario_id],
+        );
+        await connection.query(
+          `INSERT INTO sancion
+            (fk_usuario_id, fk_partido_id, tipo_sancion, descripcion,
+             fecha_sancion, fk_creado_por_id)
+           VALUES (?, NULL, 'Suspensión 2 semanas',
+             'Suspensión automática por 3 inasistencias consecutivas.', NOW(), ?)`,
+          [reserva.fk_usuario_id, adminId],
+        );
+        await connection.query(
+          `INSERT INTO notificacion (fk_usuario_id, titulo, mensaje, tipo)
+           VALUES (?, 'Cuenta Suspendida',
+             'Has acumulado 3 inasistencias. No podrás reservar por 14 días.',
+             'Sancion')`,
+          [reserva.fk_usuario_id],
+        );
+      }
+
+      await connection.query(
+        `INSERT INTO audit_log
+          (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles)
+         VALUES (?, 'REGISTRAR_INASISTENCIA', 'reserva', ?, ?)`,
+        [
+          adminId,
+          reservaId,
+          JSON.stringify({
+            usuarioId: reserva.fk_usuario_id,
+            totalInasistencias: total,
+            suspendido,
+          }),
+        ],
+      );
+      await connection.commit();
       return {
         reservaId,
-        estado: 'INASISTENCIA',
-        inasistenciasAcumuladas: currentInasistencias,
+        estado: "INASISTENCIA",
+        inasistenciasAcumuladas: total,
         cuentaSuspendida: suspendido,
       };
-    } else {
-      reserva = store.reservas.find(r => r.id === reservaId);
-      if (!reserva) throw new AppError('Reserva no encontrada', 404);
-      reserva.estado = 'INASISTENCIA';
-      reserva.asistencia_confirmada = false;
-      reserva.devolucion_sena = false;
-
-      const user = store.usuarios.find(u => u.id === reserva.fk_usuario_id);
-      if (user) {
-        user.inasistencias += 1;
-        let suspendido = false;
-        if (user.inasistencias >= 3) {
-          suspendido = true;
-          user.estado_cuenta = 'Suspendida';
-          const sup = new Date();
-          sup.setDate(sup.getDate() + 14);
-          user.suspension_hasta = sup.toISOString();
-
-          store.sanciones.push({
-            id: store.sanciones.length + 1,
-            fk_usuario_id: user.id,
-            fk_partido_id: null,
-            tipo_sancion: 'Suspensión 2 semanas',
-            descripcion: 'Suspensión automática por acumular 3 inasistencias consecutivas.',
-            fecha_sancion: new Date().toISOString(),
-            fk_creado_por_id: adminId,
-          });
-
-          store.notificaciones.push({
-            id: store.notificaciones.length + 1,
-            fk_usuario_id: user.id,
-            titulo: 'Cuenta Suspendida por Inasistencias',
-            mensaje: 'Has acumulado 3 inasistencias a turnos reservados. Tu cuenta está suspendida por 14 días.',
-            tipo: 'Sancion',
-            leida: false,
-            created_at: new Date().toISOString(),
-          });
-        }
-
-        store.auditLogs.push({
-          id: store.auditLogs.length + 1,
-          fk_usuario_id: adminId,
-          accion: 'REGISTRAR_INASISTENCIA',
-          entidad_afectada: 'reserva',
-          entidad_id: reservaId,
-          detalles: JSON.stringify({ usuarioId: user.id, inasistencias: user.inasistencias, suspendido }),
-          ip_address: '127.0.0.1',
-          created_at: new Date().toISOString(),
-        });
-
-        return {
-          reservaId,
-          estado: 'INASISTENCIA',
-          inasistenciasAcumuladas: user.inasistencias,
-          cuentaSuspendida: suspendido,
-        };
-      }
-      return { reservaId, estado: 'INASISTENCIA' };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
   }
 
   async confirmarAsistencia(reservaId: number, adminId: number) {
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT * FROM reserva WHERE id = ?', [reservaId]);
-      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
+      const [rows]: any = await pool.query(
+        "SELECT * FROM reserva WHERE id = ?",
+        [reservaId],
+      );
+      if (!rows || rows.length === 0)
+        throw new AppError("Reserva no encontrada", 404);
       const reserva = rows[0];
 
-      await pool.query('UPDATE reserva SET estado = "FINALIZADA", asistencia_confirmada = true WHERE id = ?', [reservaId]);
-      await pool.query('UPDATE usuario SET inasistencias = 0 WHERE id = ?', [reserva.fk_usuario_id]);
+      await pool.query(
+        'UPDATE reserva SET estado = "FINALIZADA", asistencia_confirmada = true WHERE id = ?',
+        [reservaId],
+      );
+      await pool.query("UPDATE usuario SET inasistencias = 0 WHERE id = ?", [
+        reserva.fk_usuario_id,
+      ]);
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CONFIRMAR_ASISTENCIA", "reserva", ?, ?)',
-        [adminId, reservaId, JSON.stringify({ usuarioId: reserva.fk_usuario_id, inasistenciasReset: 0 })]
+        [
+          adminId,
+          reservaId,
+          JSON.stringify({
+            usuarioId: reserva.fk_usuario_id,
+            inasistenciasReset: 0,
+          }),
+        ],
       );
 
       return {
         reservaId,
-        estado: 'FINALIZADA',
+        estado: "FINALIZADA",
         asistenciaConfirmada: true,
         inasistencias: 0,
       };
     } else {
-      const reserva = store.reservas.find(r => r.id === reservaId);
-      if (!reserva) throw new AppError('Reserva no encontrada', 404);
-      reserva.estado = 'FINALIZADA';
+      const reserva = store.reservas.find((r) => r.id === reservaId);
+      if (!reserva) throw new AppError("Reserva no encontrada", 404);
+      reserva.estado = "FINALIZADA";
       reserva.asistencia_confirmada = true;
 
-      const user = store.usuarios.find(u => u.id === reserva.fk_usuario_id);
+      const user = store.usuarios.find((u) => u.id === reserva.fk_usuario_id);
       if (user) {
         user.inasistencias = 0;
       }
@@ -529,17 +618,20 @@ export class ReservasService {
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'CONFIRMAR_ASISTENCIA',
-        entidad_afectada: 'reserva',
+        accion: "CONFIRMAR_ASISTENCIA",
+        entidad_afectada: "reserva",
         entidad_id: reservaId,
-        detalles: JSON.stringify({ usuarioId: reserva.fk_usuario_id, inasistenciasReset: 0 }),
-        ip_address: '127.0.0.1',
+        detalles: JSON.stringify({
+          usuarioId: reserva.fk_usuario_id,
+          inasistenciasReset: 0,
+        }),
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
 
       return {
         reservaId,
-        estado: 'FINALIZADA',
+        estado: "FINALIZADA",
         asistenciaConfirmada: true,
         inasistencias: 0,
       };
@@ -555,7 +647,7 @@ export class ReservasService {
          JOIN cancha c ON r.fk_cancha_id = c.id
          WHERE r.fk_usuario_id = ?
          ORDER BY r.fecha DESC, r.hora DESC`,
-        [userId]
+        [userId],
       );
       return rows.map((r: any) => {
         const terms = computeCancelTerms(r);
@@ -569,15 +661,15 @@ export class ReservasService {
       });
     } else {
       return store.reservas
-        .filter(r => r.fk_usuario_id === userId)
-        .map(r => {
-          const c = store.canchas.find(ca => ca.id === r.fk_cancha_id);
+        .filter((r) => r.fk_usuario_id === userId)
+        .map((r) => {
+          const c = store.canchas.find((ca) => ca.id === r.fk_cancha_id);
           const terms = computeCancelTerms(r);
           return {
             ...r,
-            cancha_nombre: c?.nombre || 'Cancha',
-            deporte: c?.deporte || 'Futbol 5',
-            superficie: c?.superficie || 'Sintético',
+            cancha_nombre: c?.nombre || "Cancha",
+            deporte: c?.deporte || "Futbol 5",
+            superficie: c?.superficie || "Sintético",
             techada: c?.techada || false,
             horas_anticipacion: terms.horasAnticipacion,
             aplica_devolucion: terms.aplicaDevolucion,
@@ -600,10 +692,10 @@ export class ReservasService {
       `;
       const params: any[] = [];
       if (fecha) {
-        query += ' WHERE r.fecha = ?';
+        query += " WHERE r.fecha = ?";
         params.push(fecha);
       }
-      query += ' ORDER BY r.fecha DESC, r.hora ASC';
+      query += " ORDER BY r.fecha DESC, r.hora ASC";
       const [rows]: any = await pool.query(query, params);
       return rows.map((r: any) => {
         const terms = computeCancelTerms(r);
@@ -618,19 +710,19 @@ export class ReservasService {
     } else {
       let list = store.reservas;
       if (fecha) {
-        list = list.filter(r => r.fecha === fecha);
+        list = list.filter((r) => r.fecha === fecha);
       }
-      return list.map(r => {
-        const c = store.canchas.find(ca => ca.id === r.fk_cancha_id);
-        const u = store.usuarios.find(user => user.id === r.fk_usuario_id);
+      return list.map((r) => {
+        const c = store.canchas.find((ca) => ca.id === r.fk_cancha_id);
+        const u = store.usuarios.find((user) => user.id === r.fk_usuario_id);
         const terms = computeCancelTerms(r);
         return {
           ...r,
-          cancha_nombre: c?.nombre || 'Cancha',
-          deporte: c?.deporte || 'Futbol 5',
-          usuario_nombre: u?.nombre || 'Usuario',
-          usuario_email: u?.email || '',
-          usuario_telefono: u?.telefono || '',
+          cancha_nombre: c?.nombre || "Cancha",
+          deporte: c?.deporte || "Futbol 5",
+          usuario_nombre: u?.nombre || "Usuario",
+          usuario_email: u?.email || "",
+          usuario_telefono: u?.telefono || "",
           inasistencias: u?.inasistencias || 0,
           horas_anticipacion: terms.horasAnticipacion,
           aplica_devolucion: terms.aplicaDevolucion,
@@ -646,20 +738,24 @@ export class ReservasService {
     if (isDbConnected()) {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
-        'SELECT r.*, c.nombre as cancha_nombre FROM reserva r JOIN cancha c ON r.fk_cancha_id = c.id WHERE r.id = ?',
-        [reservaId]
+        "SELECT r.*, c.nombre as cancha_nombre FROM reserva r JOIN cancha c ON r.fk_cancha_id = c.id WHERE r.id = ?",
+        [reservaId],
       );
-      if (!rows || rows.length === 0) throw new AppError('Reserva no encontrada', 404);
+      if (!rows || rows.length === 0)
+        throw new AppError("Reserva no encontrada", 404);
       reserva = rows[0];
     } else {
-      reserva = store.reservas.find(r => r.id === reservaId);
-      if (!reserva) throw new AppError('Reserva no encontrada', 404);
-      const c = store.canchas.find(ca => ca.id === reserva.fk_cancha_id);
-      reserva.cancha_nombre = c?.nombre || 'Cancha';
+      reserva = store.reservas.find((r) => r.id === reservaId);
+      if (!reserva) throw new AppError("Reserva no encontrada", 404);
+      const c = store.canchas.find((ca) => ca.id === reserva.fk_cancha_id);
+      reserva.cancha_nombre = c?.nombre || "Cancha";
     }
 
-    if (reserva.fk_usuario_id !== userId && userRol !== 'Administrador') {
-      throw new AppError('No tienes autorización para consultar esta reserva', 403);
+    if (reserva.fk_usuario_id !== userId && userRol !== "Administrador") {
+      throw new AppError(
+        "No tienes autorización para consultar esta reserva",
+        403,
+      );
     }
 
     const { horasAnticipacion, aplicaDevolucion } = computeCancelTerms(reserva);
@@ -673,8 +769,8 @@ export class ReservasService {
       montoSena,
       montoSenaDevuelto: aplicaDevolucion ? montoSena : 0,
       mensaje: aplicaDevolucion
-        ? 'Aplica reintegro del 100% de la seña por cancelarse con más de 24 horas de antelación.'
-        : 'No aplica reintegro de seña por cancelarse con menos de 24 horas de antelación.',
+        ? "Aplica reintegro del 100% de la seña por cancelarse con más de 24 horas de antelación."
+        : "No aplica reintegro de seña por cancelarse con menos de 24 horas de antelación.",
     };
   }
 }
