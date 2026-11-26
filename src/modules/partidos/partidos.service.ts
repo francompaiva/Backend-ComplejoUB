@@ -1,11 +1,21 @@
 import { AppError } from '../../middlewares/error.middleware.js';
+import type { PoolConnection } from 'mysql2/promise';
 import { isDbConnected, getPool } from '../../config/database.js';
 import { store, PartidoModel } from '../../config/in-memory-store.js';
+
+export interface TarjetaResultadoDTO {
+  jugadorId: number;
+  equipoId: number;
+  tipo: 'AMARILLA' | 'ROJA';
+  minuto: number;
+  motivo?: string;
+}
 
 export interface CargarResultadoDTO {
   golesLocal: number;
   golesVisitante: number;
   observaciones?: string;
+  tarjetas?: TarjetaResultadoDTO[];
 }
 
 export interface AsignarArbitroDTO {
@@ -122,93 +132,137 @@ export class PartidosService {
    * RF-11: Actualización automática de posiciones (PTS: 3 vic, 1 emp, 0 der; GF, GC, DG)
    * RF-19: Estado pasa a 'DISPUTADO'
    */
-  
-async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: string, data: CargarResultadoDTO) {
-  // Nunca confirmar un acta guardada solamente en memoria.
-  if (!isDbConnected()) {
-    throw new AppError(
-      'La base de datos no está disponible. El acta no fue guardada.',
-      503
-    );
-  }
-
-  const partido = await this.getById(partidoId);
-
-
-    // Validar autorización: Solo el Árbitro asignado o un Administrador pueden cargar el resultado
-    if (usuarioRol === 'Arbitro' && partido.fk_arbitro_id !== usuarioId) {
-      throw new AppError('No tienes permiso para registrar resultados de un partido que no tienes asignado', 403);
+  async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: string, data: CargarResultadoDTO) {
+    // Nunca confirmar como guardado un acta que solo existe en memoria.
+    if (!isDbConnected()) {
+      throw new AppError('MySQL no está disponible. El acta no fue guardada.', 503);
     }
 
+    if (!Number.isInteger(data.golesLocal) || !Number.isInteger(data.golesVisitante) ||
+        data.golesLocal < 0 || data.golesVisitante < 0 ||
+        data.golesLocal > 99 || data.golesVisitante > 99) {
+      throw new AppError('Los goles deben ser números enteros entre 0 y 99.', 400);
+    }
 
-    // El árbitro solamente puede cerrar partidos programados.
-    // La corrección de resultados ya cerrados queda para Administración.
-    if (usuarioRol === 'Arbitro' && partido.estado !== 'PROGRAMADO') {
-      throw new AppError(
-        'Este partido ya fue cerrado o no está programado. Solicitá la corrección al administrador.',
-        409
+    const tarjetas = data.tarjetas ?? [];
+    if (!Array.isArray(tarjetas) || tarjetas.length > 50) {
+      throw new AppError('La lista de tarjetas es inválida (máximo 50).', 400);
+    }
+    if (data.observaciones !== undefined &&
+        (typeof data.observaciones !== 'string' || data.observaciones.length > 10000)) {
+      throw new AppError('Las observaciones son inválidas.', 400);
+    }
+
+    const pool = getPool()!;
+    const conexion = await pool.getConnection();
+    try {
+      await conexion.beginTransaction();
+
+      // Bloquear el partido hasta terminar el guardado: evita cierres simultáneos.
+      const [rows]: any = await conexion.query(
+        'SELECT * FROM partido WHERE id = ? FOR UPDATE', [partidoId]
       );
-    }
+      if (!rows.length) throw new AppError('Partido no encontrado.', 404);
+      const partido = rows[0];
 
-
-    if (partido.fk_equipo_visitante_id === null) {
-      throw new AppError('No se puede cargar resultado a un partido de Fecha Libre', 400);
-    }
-
-    const { golesLocal, golesVisitante, observaciones } = data;
-    if (golesLocal === undefined || golesVisitante === undefined || golesLocal < 0 || golesVisitante < 0) {
-      throw new AppError('Goles local y goles visitante deben ser valores numéricos mayores o iguales a cero', 400);
-    }
-
-    if (isDbConnected()) {
-      const pool = getPool()!;
-      // Actualizar partido
-      await pool.query(
-        `UPDATE partido 
-         SET goles_local = ?, goles_visitante = ?, observaciones = ?, estado = 'DISPUTADO'
-         WHERE id = ?`,
-        [golesLocal, golesVisitante, observaciones || null, partidoId]
-      );
-
-      // Recalcular tabla de posiciones para el torneo (RF-11)
-      try {
-        await pool.query('CALL sp_actualizar_tabla_posiciones(?)', [partido.fk_torneo_id]);
-      } catch (spErr: any) {
-        console.warn(`[partidosService] sp_actualizar_tabla_posiciones no disponible (${spErr.message}). Ejecutando fallback de recálculo directo en SQL.`);
-        await this.recalcularPosicionesDirecto(partido.fk_torneo_id);
+      if (usuarioRol !== 'Arbitro' && usuarioRol !== 'Administrador') {
+        throw new AppError('No tenés permiso para cargar resultados.', 403);
+      }
+      if (usuarioRol === 'Arbitro' && Number(partido.fk_arbitro_id) !== usuarioId) {
+        throw new AppError('Este encuentro no está asignado a tu cuenta.', 403);
+      }
+      if (usuarioRol === 'Arbitro' && partido.estado !== 'PROGRAMADO') {
+        throw new AppError('El partido ya está cerrado o no está programado.', 409);
+      }
+      if (partido.fk_equipo_visitante_id === null) {
+        throw new AppError('No podés registrar un resultado en una fecha libre.', 400);
+      }
+      if (partido.estado !== 'PROGRAMADO' && tarjetas.length > 0) {
+        throw new AppError('Las tarjetas de un partido cerrado requieren una corrección administrativa específica.', 409);
       }
 
-      await pool.query(
-        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CARGAR_RESULTADO", "partido", ?, ?)',
-        [usuarioId, partidoId, JSON.stringify({ golesLocal, golesVisitante, torneoId: partido.fk_torneo_id })]
-      );
+      const equiposValidos = [
+        Number(partido.fk_equipo_local_id),
+        Number(partido.fk_equipo_visitante_id)
+      ];
 
-      return this.getById(partidoId);
-    } else {
-      const part = store.partidos.find(p => p.id === partidoId);
-      if (part) {
-        part.goles_local = golesLocal;
-        part.goles_visitante = golesVisitante;
-        part.observaciones = observaciones || null;
-        part.estado = 'DISPUTADO';
+      for (const tarjeta of tarjetas) {
+        if (!tarjeta ||
+            !Number.isInteger(tarjeta.jugadorId) ||
+            !Number.isInteger(tarjeta.equipoId) ||
+            !equiposValidos.includes(tarjeta.equipoId) ||
+            !['AMARILLA', 'ROJA'].includes(tarjeta.tipo) ||
+            !Number.isInteger(tarjeta.minuto) ||
+            tarjeta.minuto < 1 || tarjeta.minuto > 90 ||
+            (tarjeta.motivo !== undefined &&
+              (typeof tarjeta.motivo !== 'string' || tarjeta.motivo.length > 300))) {
+          throw new AppError('Una de las tarjetas tiene datos inválidos.', 400);
+        }
+
+        // El ID del jugador debe pertenecer al plantel aceptado del equipo indicado.
+        const [jugadores]: any = await conexion.query(
+          `SELECT 1 FROM equipo_jugador
+           WHERE fk_equipo_id = ? AND fk_usuario_id = ? AND estado_invitacion = 'ACEPTADA'
+           LIMIT 1`,
+          [tarjeta.equipoId, tarjeta.jugadorId]
+        );
+        if (!jugadores.length) {
+          throw new AppError('Una tarjeta refiere a un jugador que no integra ese equipo.', 400);
+        }
       }
 
-      // Actualizar tabla de posiciones en memoria (RF-11)
-      this.recalcularPosicionesEnMemoria(partido.fk_torneo_id);
+      await conexion.query(
+        `UPDATE partido SET goles_local = ?, goles_visitante = ?,
+            observaciones = ?, estado = 'DISPUTADO' WHERE id = ?`,
+        [data.golesLocal, data.golesVisitante, data.observaciones?.trim() || null, partidoId]
+      );
 
-      store.auditLogs.push({
-        id: store.auditLogs.length + 1,
-        fk_usuario_id: usuarioId,
-        accion: 'CARGAR_RESULTADO',
-        entidad_afectada: 'partido',
-        entidad_id: partidoId,
-        detalles: JSON.stringify({ golesLocal, golesVisitante, torneoId: partido.fk_torneo_id }),
-        ip_address: '127.0.0.1',
-        created_at: new Date().toISOString(),
-      });
+      // Una fila por tarjeta, asociada al jugador, partido y árbitro que firma el acta.
+      // Las suspensiones por inasistencia no se modifican ni se recalculan aquí.
+      for (const tarjeta of tarjetas) {
+        const tipoSancion = tarjeta.tipo === 'AMARILLA' ? 'Tarjeta Amarilla' : 'Tarjeta Roja';
+        const descripcion = [
+          `Minuto ${tarjeta.minuto}`,
+          `Equipo ID ${tarjeta.equipoId}`,
+          tarjeta.tipo === 'ROJA' && tarjeta.motivo?.trim()
+            ? `Motivo: ${tarjeta.motivo.trim()}` : ''
+        ].filter(Boolean).join(' | ');
 
-      return this.getById(partidoId);
+        await conexion.query(
+          `INSERT INTO sancion
+           (fk_usuario_id, fk_partido_id, tipo_sancion, descripcion, fecha_sancion, fk_creado_por_id)
+           VALUES (?, ?, ?, ?, NOW(), ?)`,
+          [tarjeta.jugadorId, partidoId, tipoSancion, descripcion, usuarioId]
+        );
+      }
+
+      // Se recalcula en LA MISMA conexión/transacción que el resultado y las tarjetas.
+      // Evita confirmar el acta si falla el recálculo de posiciones.
+      await this.recalcularPosicionesDirecto(Number(partido.fk_torneo_id), conexion);
+
+      await conexion.query(
+        `INSERT INTO audit_log
+         (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles)
+         VALUES (?, 'CARGAR_RESULTADO', 'partido', ?, ?)`,
+        [usuarioId, partidoId, JSON.stringify({
+          golesLocal: data.golesLocal,
+          golesVisitante: data.golesVisitante,
+          torneoId: Number(partido.fk_torneo_id),
+          tarjetasRegistradas: tarjetas.length
+        })]
+      );
+
+      await conexion.commit();
+    } catch (error) {
+      try { await conexion.rollback(); } catch (rollbackError) {
+        console.error('[partidosService] Error al revertir la transacción:', rollbackError);
+      }
+      throw error;
+    } finally {
+      conexion.release();
     }
+
+    return this.getById(partidoId);
   }
 
   /**
@@ -437,14 +491,14 @@ async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: strin
    * Recálculo directo en MySQL como fallback resiliente cuando el SP
    * sp_actualizar_tabla_posiciones no está instalado en la base de datos.
    */
-  async recalcularPosicionesDirecto(torneoId: number) {
+  async recalcularPosicionesDirecto(torneoId: number, conexion?: PoolConnection) {
     if (!isDbConnected()) {
       this.recalcularPosicionesEnMemoria(torneoId);
       return;
     }
-    const pool = getPool()!;
+    const db = conexion ?? getPool()!;
     try {
-      await pool.query(
+      await db.query(
         `UPDATE equipo
          SET puntos = 0, partidos_jugados = 0, partidos_ganados = 0, partidos_empatados = 0,
              partidos_perdidos = 0, goles_favor = 0, goles_contra = 0, diferencia_goles = 0
@@ -452,7 +506,7 @@ async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: strin
         [torneoId]
       );
 
-      await pool.query(
+      await db.query(
         `UPDATE equipo e
          JOIN (
            SELECT 
@@ -485,7 +539,7 @@ async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: strin
         [torneoId]
       );
 
-      await pool.query(
+      await db.query(
         `UPDATE equipo e
          JOIN (
            SELECT 
@@ -518,7 +572,7 @@ async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: strin
         [torneoId]
       );
 
-      await pool.query(
+      await db.query(
         `UPDATE equipo
          SET diferencia_goles = goles_favor - goles_contra
          WHERE fk_torneo_id = ?`,
@@ -526,6 +580,7 @@ async registrarResultado(partidoId: number, usuarioId: number, usuarioRol: strin
       );
     } catch (directErr: any) {
       console.error('[partidosService] Fallo crítico al recalcular posiciones directamente en SQL:', directErr.message);
+      throw directErr;
     }
   }
 }
