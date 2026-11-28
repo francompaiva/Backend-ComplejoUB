@@ -1,10 +1,10 @@
-import { AppError } from '../../middlewares/error.middleware.js';
-import { isDbConnected, getPool } from '../../config/database.js';
-import { store, CanchaModel } from '../../config/in-memory-store.js';
+import { AppError } from "../../middlewares/error.middleware.js";
+import { isDbConnected, getPool } from "../../config/database.js";
+import { store, CanchaModel } from "../../config/in-memory-store.js";
 
 export interface CreateCanchaDTO {
   nombre: string;
-  deporte: 'Futbol 5' | 'Futbol 8' | 'Futbol 11' | 'Tenis' | 'Padel';
+  deporte: "Futbol 5" | "Futbol 8" | "Futbol 11" | "Tenis" | "Padel";
   superficie?: string;
   techada?: boolean;
   iluminacion?: boolean;
@@ -16,33 +16,51 @@ export class CanchasService {
   async getAll(deporte?: string) {
     if (isDbConnected()) {
       const pool = getPool()!;
-      let query = 'SELECT * FROM cancha WHERE activa = true';
+      let query = "SELECT * FROM cancha WHERE activa = true";
       const params: any[] = [];
       if (deporte) {
-        query += ' AND deporte = ?';
+        query += " AND deporte = ?";
         params.push(deporte);
       }
-      query += ' ORDER BY id ASC';
+      query += " ORDER BY id ASC";
       const [rows] = await pool.query(query, params);
       return rows;
     } else {
-      let result = store.canchas.filter(c => c.activa);
+      let result = store.canchas.filter((c) => c.activa);
       if (deporte) {
-        result = result.filter(c => c.deporte.toLowerCase() === deporte.toLowerCase());
+        result = result.filter(
+          (c) => c.deporte.toLowerCase() === deporte.toLowerCase(),
+        );
       }
       return result;
     }
   }
 
+  async getAllAdmin() {
+    if (isDbConnected()) {
+      const pool = getPool()!;
+
+      const [rows] = await pool.query("SELECT * FROM cancha ORDER BY id ASC");
+
+      return rows;
+    }
+
+    return [...store.canchas].sort((a, b) => a.id - b.id);
+  }
+
   async getById(id: number) {
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT * FROM cancha WHERE id = ?', [id]);
-      if (!rows || rows.length === 0) throw new AppError('Cancha no encontrada', 404);
+      const [rows]: any = await pool.query(
+        "SELECT * FROM cancha WHERE id = ?",
+        [id],
+      );
+      if (!rows || rows.length === 0)
+        throw new AppError("Cancha no encontrada", 404);
       return rows[0];
     } else {
-      const found = store.canchas.find(c => c.id === id);
-      if (!found) throw new AppError('Cancha no encontrada', 404);
+      const found = store.canchas.find((c) => c.id === id);
+      if (!found) throw new AppError("Cancha no encontrada", 404);
       return found;
     }
   }
@@ -54,7 +72,7 @@ export class CanchasService {
    */
   async getDisponibilidad(canchaId: number, fechaStr: string) {
     const cancha = await this.getById(canchaId);
-    const dateObj = new Date(fechaStr + 'T00:00:00');
+    const dateObj = new Date(fechaStr + "T00:00:00");
     const dayOfWeek = dateObj.getDay(); // 0 = Domingo, 6 = Sábado
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
@@ -68,13 +86,18 @@ export class CanchasService {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
         'SELECT hora, estado FROM reserva WHERE fk_cancha_id = ? AND fecha = ? AND estado = "CONFIRMADA"',
-        [canchaId, fechaStr]
+        [canchaId, fechaStr],
       );
       reservasExistentes = rows;
     } else {
       reservasExistentes = store.reservas
-        .filter(r => r.fk_cancha_id === canchaId && r.fecha === fechaStr && r.estado === 'CONFIRMADA')
-        .map(r => ({ hora: r.hora, estado: r.estado }));
+        .filter(
+          (r) =>
+            r.fk_cancha_id === canchaId &&
+            r.fecha === fechaStr &&
+            r.estado === "CONFIRMADA",
+        )
+        .map((r) => ({ hora: r.hora, estado: r.estado }));
     }
 
     // Obtener partidos de torneo que ocupen esta cancha específica
@@ -83,40 +106,54 @@ export class CanchasService {
       const pool = getPool()!;
       const [rows]: any = await pool.query(
         'SELECT hora, id FROM partido WHERE fk_cancha_id = ? AND fecha = ? AND estado != "SUSPENDIDO" AND fk_equipo_visitante_id IS NOT NULL',
-        [canchaId, fechaStr]
+        [canchaId, fechaStr],
       );
       partidosEnCancha = rows;
     } else {
       partidosEnCancha = store.partidos
-        .filter(p => p.fk_cancha_id === canchaId && p.fecha === fechaStr && p.estado !== 'SUSPENDIDO' && p.fk_equipo_visitante_id !== null)
-        .map(p => ({ hora: p.hora, id: p.id }));
+        .filter(
+          (p) =>
+            p.fk_cancha_id === canchaId &&
+            p.fecha === fechaStr &&
+            p.estado !== "SUSPENDIDO" &&
+            p.fk_equipo_visitante_id !== null,
+        )
+        .map((p) => ({ hora: p.hora, id: p.id }));
     }
 
     // Generar franjas horarias de 08:00 a 23:00 (duración fija de 1 hora)
     const slots = [];
     for (let h = 8; h <= 23; h++) {
-      const hourStr = `${h.toString().padStart(2, '0')}:00:00`;
-      const timeDisplay = `${h.toString().padStart(2, '0')}:00`;
+      const hourStr = `${h.toString().padStart(2, "0")}:00:00`;
+      const timeDisplay = `${h.toString().padStart(2, "0")}:00`;
 
-      const estaReservado = reservasExistentes.some(r => r.hora.startsWith(hourStr.slice(0, 5)));
-      const tienePartido = partidosEnCancha.some(p => p.hora.startsWith(hourStr.slice(0, 5)));
+      const estaReservado = reservasExistentes.some((r) =>
+        r.hora.startsWith(hourStr.slice(0, 5)),
+      );
+      const tienePartido = partidosEnCancha.some((p) =>
+        p.hora.startsWith(hourStr.slice(0, 5)),
+      );
 
-      let estado: 'Libre' | 'Ocupado' | 'DeshabilitadoTorneo' | 'Mantenimiento' = 'Libre';
-      let motivo = '';
+      let estado:
+        | "Libre"
+        | "Ocupado"
+        | "DeshabilitadoTorneo"
+        | "Mantenimiento" = "Libre";
+      let motivo = "";
 
       // Evaluación horaria en zona horaria oficial del Complejo (Argentina: UTC-3)
       const slotDateTime = new Date(`${fechaStr}T${hourStr}-03:00`);
       const yaPaso = slotDateTime.getTime() <= Date.now();
 
       if (yaPaso) {
-        estado = 'Ocupado';
-        motivo = 'Horario concluido';
+        estado = "Ocupado";
+        motivo = "Horario concluido";
       } else if (tienePartido) {
-        estado = 'DeshabilitadoTorneo';
-        motivo = 'Turno asignado a partido oficial de torneo';
+        estado = "DeshabilitadoTorneo";
+        motivo = "Turno asignado a partido oficial de torneo";
       } else if (estaReservado) {
-        estado = 'Ocupado';
-        motivo = 'Turno reservado por otro usuario';
+        estado = "Ocupado";
+        motivo = "Turno reservado por otro usuario";
       }
 
       slots.push({
@@ -137,7 +174,9 @@ export class CanchasService {
       esFinDeSemana: isWeekend,
       bloqueadoPorTorneo: false, // Ahora el bloqueo es por franja horaria individual (RF-06), no de día completo
       tienePartidosTorneo: tienePartidosEnFecha,
-      motivoBloqueo: tienePartidosEnFecha ? 'La cancha cuenta con partidos de torneo en horarios específicos' : '',
+      motivoBloqueo: tienePartidosEnFecha
+        ? "La cancha cuenta con partidos de torneo en horarios específicos"
+        : "",
       slots,
     };
   }
@@ -145,29 +184,44 @@ export class CanchasService {
   async create(data: CreateCanchaDTO, adminId: number) {
     const precio = data.precioHora ?? data.precio_hora;
     if (!data.nombre || !data.deporte || precio === undefined) {
-      throw new AppError('Nombre, deporte y precio por hora son obligatorios', 400);
+      throw new AppError(
+        "Nombre, deporte y precio por hora son obligatorios",
+        400,
+      );
     }
 
-    const deporteNorm = (data.deporte as string).replace('ú', 'u').replace('á', 'a') as any;
+    const deporteNorm = (data.deporte as string)
+      .replace("ú", "u")
+      .replace("á", "a") as any;
 
     if (isDbConnected()) {
       const pool = getPool()!;
       const [res]: any = await pool.query(
-        'INSERT INTO cancha (nombre, deporte, superficie, techada, iluminacion, precio_hora, activa) VALUES (?, ?, ?, ?, ?, ?, true)',
-        [data.nombre, deporteNorm, data.superficie || 'Sintetico', !!data.techada, data.iluminacion !== false, precio]
+        "INSERT INTO cancha (nombre, deporte, superficie, techada, iluminacion, precio_hora, activa) VALUES (?, ?, ?, ?, ?, ?, true)",
+        [
+          data.nombre,
+          deporteNorm,
+          data.superficie || "Sintetico",
+          !!data.techada,
+          data.iluminacion !== false,
+          precio,
+        ],
       );
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_CANCHA", "cancha", ?, ?)',
-        [adminId || null, res.insertId, JSON.stringify(data)]
+        [adminId || null, res.insertId, JSON.stringify(data)],
       );
       return this.getById(res.insertId);
     } else {
-      const newId = store.canchas.length > 0 ? Math.max(...store.canchas.map(c => c.id)) + 1 : 1;
+      const newId =
+        store.canchas.length > 0
+          ? Math.max(...store.canchas.map((c) => c.id)) + 1
+          : 1;
       const newCancha: CanchaModel = {
         id: newId,
         nombre: data.nombre,
         deporte: data.deporte,
-        superficie: data.superficie || 'Sintético',
+        superficie: data.superficie || "Sintético",
         techada: !!data.techada,
         iluminacion: data.iluminacion !== false,
         precio_hora: precio,
@@ -177,18 +231,22 @@ export class CanchasService {
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'CREAR_CANCHA',
-        entidad_afectada: 'cancha',
+        accion: "CREAR_CANCHA",
+        entidad_afectada: "cancha",
         entidad_id: newId,
         detalles: JSON.stringify(data),
-        ip_address: '127.0.0.1',
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
       return newCancha;
     }
   }
 
-  async update(id: number, data: Partial<CreateCanchaDTO & { activa: boolean }>, adminId: number) {
+  async update(
+    id: number,
+    data: Partial<CreateCanchaDTO & { activa: boolean }>,
+    adminId: number,
+  ) {
     const existing = await this.getById(id);
 
     if (isDbConnected()) {
@@ -198,11 +256,16 @@ export class CanchasService {
 
       const colMap: Record<string, any> = {};
       if (data.nombre !== undefined) colMap.nombre = data.nombre;
-      if (data.deporte !== undefined) colMap.deporte = (data.deporte as string).replace('ú', 'u').replace('á', 'a');
+      if (data.deporte !== undefined)
+        colMap.deporte = (data.deporte as string)
+          .replace("ú", "u")
+          .replace("á", "a");
       if (data.superficie !== undefined) colMap.superficie = data.superficie;
       if (data.techada !== undefined) colMap.techada = !!data.techada;
-      if (data.iluminacion !== undefined) colMap.iluminacion = !!data.iluminacion;
-      if ((data as any).hasLighting !== undefined) colMap.iluminacion = !!(data as any).hasLighting;
+      if (data.iluminacion !== undefined)
+        colMap.iluminacion = !!data.iluminacion;
+      if ((data as any).hasLighting !== undefined)
+        colMap.iluminacion = !!(data as any).hasLighting;
       if (data.precio_hora !== undefined) colMap.precio_hora = data.precio_hora;
       if (data.precioHora !== undefined) colMap.precio_hora = data.precioHora;
       if (data.activa !== undefined) colMap.activa = !!data.activa;
@@ -214,10 +277,13 @@ export class CanchasService {
 
       if (fields.length > 0) {
         values.push(id);
-        await pool.query(`UPDATE cancha SET ${fields.join(', ')} WHERE id = ?`, values);
+        await pool.query(
+          `UPDATE cancha SET ${fields.join(", ")} WHERE id = ?`,
+          values,
+        );
         await pool.query(
           'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "MODIFICAR_CANCHA", "cancha", ?, ?)',
-          [adminId, id, JSON.stringify(data)]
+          [adminId, id, JSON.stringify(data)],
         );
       }
       return this.getById(id);
@@ -226,11 +292,11 @@ export class CanchasService {
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'MODIFICAR_CANCHA',
-        entidad_afectada: 'cancha',
+        accion: "MODIFICAR_CANCHA",
+        entidad_afectada: "cancha",
         entidad_id: id,
         detalles: JSON.stringify(data),
-        ip_address: '127.0.0.1',
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
       return existing;
@@ -241,26 +307,26 @@ export class CanchasService {
     await this.getById(id);
     if (isDbConnected()) {
       const pool = getPool()!;
-      await pool.query('UPDATE cancha SET activa = false WHERE id = ?', [id]);
+      await pool.query("UPDATE cancha SET activa = false WHERE id = ?", [id]);
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "ELIMINAR_CANCHA", "cancha", ?, NULL)',
-        [adminId, id]
+        [adminId, id],
       );
     } else {
-      const idx = store.canchas.findIndex(c => c.id === id);
+      const idx = store.canchas.findIndex((c) => c.id === id);
       if (idx !== -1) store.canchas[idx].activa = false;
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'ELIMINAR_CANCHA',
-        entidad_afectada: 'cancha',
+        accion: "ELIMINAR_CANCHA",
+        entidad_afectada: "cancha",
         entidad_id: id,
         detalles: null,
-        ip_address: '127.0.0.1',
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
     }
-    return { message: 'Cancha dada de baja con éxito' };
+    return { message: "Cancha dada de baja con éxito" };
   }
 }
 

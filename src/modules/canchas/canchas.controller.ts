@@ -1,11 +1,20 @@
-import { Request, Response, NextFunction } from 'express';
-import { canchasService } from './canchas.service.js';
+import { Request, Response, NextFunction } from "express";
+import { canchasService } from "./canchas.service.js";
 
 export class CanchasController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const deporte = req.query.deporte as string | undefined;
       const canchas = await canchasService.getAll(deporte);
+      res.status(200).json({ success: true, data: canchas });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getAllAdmin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const canchas = await canchasService.getAllAdmin();
       res.status(200).json({ success: true, data: canchas });
     } catch (error) {
       next(error);
@@ -25,12 +34,13 @@ export class CanchasController {
   async getDisponibilidad(req: Request, res: Response, next: NextFunction) {
     try {
       const id = parseInt(req.params.id, 10);
-      const fecha = (req.query.fecha as string) ||
-        new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'America/Argentina/Buenos_Aires',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
+      const fecha =
+        (req.query.fecha as string) ||
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Argentina/Buenos_Aires",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
         }).format(new Date());
       const disponibilidad = await canchasService.getDisponibilidad(id, fecha);
       res.status(200).json({ success: true, data: disponibilidad });
