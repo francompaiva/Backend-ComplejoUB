@@ -1,10 +1,14 @@
-import { AppError } from '../../middlewares/error.middleware.js';
-import { isDbConnected, getPool } from '../../config/database.js';
-import { store, TorneoModel, PartidoModel } from '../../config/in-memory-store.js';
+import { AppError } from "../../middlewares/error.middleware.js";
+import { isDbConnected, getPool } from "../../config/database.js";
+import {
+  store,
+  TorneoModel,
+  PartidoModel,
+} from "../../config/in-memory-store.js";
 
 export interface CreateTorneoDTO {
   nombre: string;
-  deporte: 'Futbol 5' | 'Futbol 8' | 'Futbol 11' | 'Tenis' | 'Padel';
+  deporte: "Futbol 5" | "Futbol 8" | "Futbol 11" | "Tenis" | "Padel";
   costoInscripcion?: number;
   costo_inscripcion?: number;
   valorPartido?: number;
@@ -26,18 +30,18 @@ export class TorneosService {
   async getAll(estado?: string) {
     if (isDbConnected()) {
       const pool = getPool()!;
-      let query = 'SELECT * FROM torneo';
+      let query = "SELECT * FROM torneo";
       const params: any[] = [];
       if (estado) {
-        query += ' WHERE estado = ?';
+        query += " WHERE estado = ?";
         params.push(estado);
       }
-      query += ' ORDER BY id DESC';
+      query += " ORDER BY id DESC";
       const [rows] = await pool.query(query, params);
       return rows;
     } else {
       let list = store.torneos;
-      if (estado) list = list.filter(t => t.estado === estado);
+      if (estado) list = list.filter((t) => t.estado === estado);
       return list;
     }
   }
@@ -45,12 +49,16 @@ export class TorneosService {
   async getById(id: number) {
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT * FROM torneo WHERE id = ?', [id]);
-      if (!rows || rows.length === 0) throw new AppError('Torneo no encontrado', 404);
+      const [rows]: any = await pool.query(
+        "SELECT * FROM torneo WHERE id = ?",
+        [id],
+      );
+      if (!rows || rows.length === 0)
+        throw new AppError("Torneo no encontrado", 404);
       return rows[0];
     } else {
-      const found = store.torneos.find(t => t.id === id);
-      if (!found) throw new AppError('Torneo no encontrado', 404);
+      const found = store.torneos.find((t) => t.id === id);
+      if (!found) throw new AppError("Torneo no encontrado", 404);
       return found;
     }
   }
@@ -64,19 +72,39 @@ export class TorneosService {
     const valorPartido = data.valorPartido ?? data.valor_partido;
     const maxEquipos = data.maxEquipos ?? data.max_equipos;
 
-    if (!nombre || !deporte || costoInscripcion === undefined || valorPartido === undefined || !maxEquipos) {
-      throw new AppError('Todos los campos del torneo son obligatorios', 400);
+    if (
+      !nombre ||
+      !deporte ||
+      costoInscripcion === undefined ||
+      valorPartido === undefined ||
+      !maxEquipos
+    ) {
+      throw new AppError("Todos los campos del torneo son obligatorios", 400);
     }
 
     if (maxEquipos < 2) {
-      throw new AppError('La cantidad máxima de equipos debe ser al menos 2', 400);
+      throw new AppError(
+        "La cantidad máxima de equipos debe ser al menos 2",
+        400,
+      );
     }
 
-    const deporteNorm = deporte.replace('ú', 'u').replace('á', 'a');
-    const minJugadores = data.minJugadoresEquipo ?? data.min_jugadores_equipo ?? (deporteNorm === 'Futbol 5' ? 5 : deporteNorm === 'Padel' ? 2 : 7);
-    const maxJugadores = data.maxJugadoresEquipo ?? data.max_jugadores_equipo ?? (deporteNorm === 'Futbol 5' ? 12 : deporteNorm === 'Padel' ? 4 : 16);
-    const fechaInicio = data.fechaInicio ?? data.fecha_inicio ?? new Date().toISOString().slice(0, 10);
-    const defaultFin = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const deporteNorm = deporte.replace("ú", "u").replace("á", "a");
+    const minJugadores =
+      data.minJugadoresEquipo ??
+      data.min_jugadores_equipo ??
+      (deporteNorm === "Futbol 5" ? 5 : deporteNorm === "Padel" ? 2 : 7);
+    const maxJugadores =
+      data.maxJugadoresEquipo ??
+      data.max_jugadores_equipo ??
+      (deporteNorm === "Futbol 5" ? 12 : deporteNorm === "Padel" ? 4 : 16);
+    const fechaInicio =
+      data.fechaInicio ??
+      data.fecha_inicio ??
+      new Date().toISOString().slice(0, 10);
+    const defaultFin = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     const fechaFin = data.fechaFin ?? data.fecha_fin ?? defaultFin;
 
     if (isDbConnected()) {
@@ -84,18 +112,32 @@ export class TorneosService {
       const [result]: any = await pool.query(
         `INSERT INTO torneo (nombre, deporte, costo_inscripcion, valor_partido, max_equipos, min_jugadores_equipo, max_jugadores_equipo, fecha_inicio, fecha_fin, estado, reglamento)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INSCRIPCION_ABIERTA', ?)`,
-        [nombre, deporteNorm, costoInscripcion, valorPartido, maxEquipos, minJugadores, maxJugadores, fechaInicio, fechaFin, data.reglamento || null]
+        [
+          nombre,
+          deporteNorm,
+          costoInscripcion,
+          valorPartido,
+          maxEquipos,
+          minJugadores,
+          maxJugadores,
+          fechaInicio,
+          fechaFin,
+          data.reglamento || null,
+        ],
       );
       const torneoId = result.insertId;
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CREAR_TORNEO", "torneo", ?, ?)',
-        [adminId || null, torneoId, JSON.stringify(data)]
+        [adminId || null, torneoId, JSON.stringify(data)],
       );
 
       return this.getById(torneoId);
     } else {
-      const newId = store.torneos.length > 0 ? Math.max(...store.torneos.map(t => t.id)) + 1 : 1;
+      const newId =
+        store.torneos.length > 0
+          ? Math.max(...store.torneos.map((t) => t.id)) + 1
+          : 1;
       const newTorneo: TorneoModel = {
         id: newId,
         nombre,
@@ -107,7 +149,7 @@ export class TorneosService {
         max_jugadores_equipo: maxJugadores,
         fecha_inicio: fechaInicio,
         fecha_fin: fechaFin,
-        estado: 'INSCRIPCION_ABIERTA',
+        estado: "INSCRIPCION_ABIERTA",
         reglamento: data.reglamento,
       };
       store.torneos.push(newTorneo);
@@ -115,11 +157,11 @@ export class TorneosService {
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'CREAR_TORNEO',
-        entidad_afectada: 'torneo',
+        accion: "CREAR_TORNEO",
+        entidad_afectada: "torneo",
         entidad_id: newId,
         detalles: JSON.stringify(data),
-        ip_address: '127.0.0.1',
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
 
@@ -358,6 +400,63 @@ export class TorneosService {
             409,
           );
         }
+
+        // Bloquear las canchas seleccionadas para evitar
+        // que se reserven mientras guardamos el fixture.
+        const canchasDelFixture = [
+          ...new Set(
+            fixtureGenerated
+              .map((p) => p.canchaId)
+              .filter((id): id is number => id !== null),
+          ),
+        ].sort((a, b) => a - b);
+
+        for (const canchaId of canchasDelFixture) {
+          const [canchaRows]: any = await conn.query(
+            "SELECT id, activa, deporte FROM cancha WHERE id = ? FOR UPDATE",
+            [canchaId],
+          );
+
+          if (
+            !canchaRows.length ||
+            !canchaRows[0].activa ||
+            normalizeSport(canchaRows[0].deporte) !==
+              normalizeSport(torneo.deporte)
+          ) {
+            throw new AppError(
+              "Una cancha del fixture dejó de estar disponible. Reintentá generar el fixture.",
+              409,
+            );
+          }
+        }
+
+        // Comprobar nuevamente cada horario después
+        // de adquirir los bloqueos de las canchas.
+        for (const p of fixtureGenerated) {
+          if (p.canchaId === null) continue;
+
+          const [reservaRows]: any = await conn.query(
+            `SELECT id FROM reserva
+             WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND estado = 'CONFIRMADA'
+             LIMIT 1 FOR UPDATE`,
+            [p.canchaId, p.fecha, p.hora],
+          );
+
+          const [partidoRows]: any = await conn.query(
+            `SELECT id FROM partido
+             WHERE fk_cancha_id = ? AND fecha = ? AND hora = ? AND fk_torneo_id <> ?
+             LIMIT 1 FOR UPDATE`,
+            [p.canchaId, p.fecha, p.hora, torneoId],
+          );
+
+          if (reservaRows.length || partidoRows.length) {
+            throw new AppError(
+              `El horario ${p.fecha} a las ${p.hora.slice(0, 5)} en la cancha ${p.canchaId} se ocupó mientras se generaba el fixture. Reintentá.`,
+              409,
+            );
+          }
+        }
+
         await conn.query("DELETE FROM partido WHERE fk_torneo_id = ?", [
           torneoId,
         ]);
@@ -376,10 +475,9 @@ export class TorneosService {
             ],
           );
         }
-        await conn.query(
-          'UPDATE torneo SET estado = "EN_CURSO" WHERE id = ?',
-          [torneoId],
-        );
+        await conn.query('UPDATE torneo SET estado = "EN_CURSO" WHERE id = ?', [
+          torneoId,
+        ]);
         await conn.query(
           'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "GENERAR_FIXTURE", "torneo", ?, ?)',
           [
@@ -467,15 +565,16 @@ export class TorneosService {
          FROM equipo
          WHERE fk_torneo_id = ?
          ORDER BY puntos DESC, diferencia_goles DESC, goles_favor DESC, nombre ASC`,
-        [torneoId]
+        [torneoId],
       );
       return equipos;
     } else {
       const equipos = store.equipos
-        .filter(e => e.fk_torneo_id === torneoId)
+        .filter((e) => e.fk_torneo_id === torneoId)
         .sort((a, b) => {
           if (b.puntos !== a.puntos) return b.puntos - a.puntos;
-          if (b.diferencia_goles !== a.diferencia_goles) return b.diferencia_goles - a.diferencia_goles;
+          if (b.diferencia_goles !== a.diferencia_goles)
+            return b.diferencia_goles - a.diferencia_goles;
           return b.goles_favor - a.goles_favor;
         });
       return equipos;
@@ -494,23 +593,27 @@ export class TorneosService {
          LEFT JOIN usuario u ON p.fk_arbitro_id = u.id
          WHERE p.fk_torneo_id = ?
          ORDER BY p.numero_fecha ASC, p.fecha ASC, p.hora ASC`,
-        [torneoId]
+        [torneoId],
       );
       return rows;
     } else {
       return store.partidos
-        .filter(p => p.fk_torneo_id === torneoId)
-        .map(p => {
-          const c = store.canchas.find(ca => ca.id === p.fk_cancha_id);
-          const el = store.equipos.find(eq => eq.id === p.fk_equipo_local_id);
-          const ev = p.fk_equipo_visitante_id ? store.equipos.find(eq => eq.id === p.fk_equipo_visitante_id) : null;
-          const u = p.fk_arbitro_id ? store.usuarios.find(user => user.id === p.fk_arbitro_id) : null;
+        .filter((p) => p.fk_torneo_id === torneoId)
+        .map((p) => {
+          const c = store.canchas.find((ca) => ca.id === p.fk_cancha_id);
+          const el = store.equipos.find((eq) => eq.id === p.fk_equipo_local_id);
+          const ev = p.fk_equipo_visitante_id
+            ? store.equipos.find((eq) => eq.id === p.fk_equipo_visitante_id)
+            : null;
+          const u = p.fk_arbitro_id
+            ? store.usuarios.find((user) => user.id === p.fk_arbitro_id)
+            : null;
           return {
             ...p,
-            cancha_nombre: c?.nombre || 'Cancha',
-            equipo_local: el?.nombre || 'Local',
-            equipo_visitante: ev ? ev.nombre : 'Fecha Libre',
-            arbitro_nombre: u ? u.nombre : 'Sin designar',
+            cancha_nombre: c?.nombre || "Cancha",
+            equipo_local: el?.nombre || "Local",
+            equipo_visitante: ev ? ev.nombre : "Fecha Libre",
+            arbitro_nombre: u ? u.nombre : "Sin designar",
           };
         })
         .sort((a, b) => a.numero_fecha - b.numero_fecha);
@@ -529,77 +632,99 @@ export class TorneosService {
       const pool = getPool()!;
       const [disputadosRows]: any = await pool.query(
         'SELECT COUNT(*) as count FROM partido WHERE fk_torneo_id = ? AND estado = "DISPUTADO"',
-        [id]
+        [id],
       );
-      const disputados = disputadosRows && disputadosRows[0] ? Number(disputadosRows[0].count) : 0;
+      const disputados =
+        disputadosRows && disputadosRows[0]
+          ? Number(disputadosRows[0].count)
+          : 0;
       if (disputados > 0) {
         throw new AppError(
           `No es posible eliminar el torneo "${torneo.nombre}" porque ya cuenta con ${disputados} partido(s) disputado(s) e historial deportivo registrado. Para cerrarlo, debe archivarse o marcarse como Finalizado/Cancelado.`,
-          400
+          400,
         );
       }
 
-      if (torneo.estado !== 'INSCRIPCION_ABIERTA') {
+      if (torneo.estado !== "INSCRIPCION_ABIERTA") {
         throw new AppError(
           `No es posible eliminar físicamente un torneo en estado "${torneo.estado}". Solo pueden eliminarse torneos en estado "INSCRIPCION_ABIERTA" sin actividad deportiva disputada.`,
-          400
+          400,
         );
       }
 
-      const [partidosRows]: any = await pool.query('SELECT COUNT(*) as count FROM partido WHERE fk_torneo_id = ?', [id]);
-      const totalPartidos = partidosRows && partidosRows[0] ? Number(partidosRows[0].count) : 0;
+      const [partidosRows]: any = await pool.query(
+        "SELECT COUNT(*) as count FROM partido WHERE fk_torneo_id = ?",
+        [id],
+      );
+      const totalPartidos =
+        partidosRows && partidosRows[0] ? Number(partidosRows[0].count) : 0;
       if (totalPartidos > 0) {
         throw new AppError(
           `No es posible eliminar el torneo porque ya posee un fixture generado con ${totalPartidos} partido(s). Cancele el torneo en lugar de eliminarlo para preservar la integridad operativa.`,
-          400
+          400,
         );
       }
 
       // Proceder con la eliminación física segura
-      await pool.query('DELETE FROM torneo WHERE id = ?', [id]);
+      await pool.query("DELETE FROM torneo WHERE id = ?", [id]);
 
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "ELIMINAR_TORNEO", "torneo", ?, ?)',
-        [adminId, id, JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte })]
+        [
+          adminId,
+          id,
+          JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte }),
+        ],
       );
     } else {
-      const disputados = store.partidos.filter(p => p.fk_torneo_id === id && p.estado === 'DISPUTADO').length;
+      const disputados = store.partidos.filter(
+        (p) => p.fk_torneo_id === id && p.estado === "DISPUTADO",
+      ).length;
       if (disputados > 0) {
         throw new AppError(
           `No es posible eliminar el torneo "${torneo.nombre}" porque ya cuenta con ${disputados} partido(s) disputado(s) e historial deportivo registrado. Para cerrarlo, debe archivarse o marcarse como Finalizado/Cancelado.`,
-          400
+          400,
         );
       }
 
-      if (torneo.estado !== 'INSCRIPCION_ABIERTA') {
+      if (torneo.estado !== "INSCRIPCION_ABIERTA") {
         throw new AppError(
           `No es posible eliminar físicamente un torneo en estado "${torneo.estado}". Solo pueden eliminarse torneos en estado "INSCRIPCION_ABIERTA" sin actividad deportiva disputada.`,
-          400
+          400,
         );
       }
 
-      const totalPartidos = store.partidos.filter(p => p.fk_torneo_id === id).length;
+      const totalPartidos = store.partidos.filter(
+        (p) => p.fk_torneo_id === id,
+      ).length;
       if (totalPartidos > 0) {
         throw new AppError(
           `No es posible eliminar el torneo porque ya posee un fixture generado con ${totalPartidos} partido(s). Cancele el torneo en lugar de eliminarlo para preservar la integridad operativa.`,
-          400
+          400,
         );
       }
 
       // Limpiar datos asociados en memoria solo si no tiene partidos
-      const equiposDelTorneo = store.equipos.filter(e => e.fk_torneo_id === id).map(e => e.id);
-      store.equipoJugadores = store.equipoJugadores.filter(ej => !equiposDelTorneo.includes(ej.fk_equipo_id));
-      store.equipos = store.equipos.filter(e => e.fk_torneo_id !== id);
-      store.torneos = store.torneos.filter(t => t.id !== id);
+      const equiposDelTorneo = store.equipos
+        .filter((e) => e.fk_torneo_id === id)
+        .map((e) => e.id);
+      store.equipoJugadores = store.equipoJugadores.filter(
+        (ej) => !equiposDelTorneo.includes(ej.fk_equipo_id),
+      );
+      store.equipos = store.equipos.filter((e) => e.fk_torneo_id !== id);
+      store.torneos = store.torneos.filter((t) => t.id !== id);
 
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'ELIMINAR_TORNEO',
-        entidad_afectada: 'torneo',
+        accion: "ELIMINAR_TORNEO",
+        entidad_afectada: "torneo",
         entidad_id: id,
-        detalles: JSON.stringify({ nombre: torneo.nombre, deporte: torneo.deporte }),
-        ip_address: '127.0.0.1',
+        detalles: JSON.stringify({
+          nombre: torneo.nombre,
+          deporte: torneo.deporte,
+        }),
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
     }
@@ -612,33 +737,49 @@ export class TorneosService {
    */
   async cancelar(id: number, adminId: number, motivo?: string) {
     const torneo = await this.getById(id);
-    if (torneo.estado === 'CANCELADO') {
-      throw new AppError('El torneo ya se encuentra cancelado', 400);
+    if (torneo.estado === "CANCELADO") {
+      throw new AppError("El torneo ya se encuentra cancelado", 400);
     }
 
     if (isDbConnected()) {
       const pool = getPool()!;
-      await pool.query('UPDATE torneo SET estado = "CANCELADO" WHERE id = ?', [id]);
+      await pool.query('UPDATE torneo SET estado = "CANCELADO" WHERE id = ?', [
+        id,
+      ]);
       await pool.query(
         'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "CANCELAR_TORNEO", "torneo", ?, ?)',
-        [adminId, id, JSON.stringify({ nombre: torneo.nombre, motivo: motivo || 'Cancelado por administración' })]
+        [
+          adminId,
+          id,
+          JSON.stringify({
+            nombre: torneo.nombre,
+            motivo: motivo || "Cancelado por administración",
+          }),
+        ],
       );
     } else {
-      const t = store.torneos.find(item => item.id === id);
-      if (t) t.estado = 'CANCELADO';
+      const t = store.torneos.find((item) => item.id === id);
+      if (t) t.estado = "CANCELADO";
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'CANCELAR_TORNEO',
-        entidad_afectada: 'torneo',
+        accion: "CANCELAR_TORNEO",
+        entidad_afectada: "torneo",
         entidad_id: id,
-        detalles: JSON.stringify({ nombre: torneo.nombre, motivo: motivo || 'Cancelado por administración' }),
-        ip_address: '127.0.0.1',
+        detalles: JSON.stringify({
+          nombre: torneo.nombre,
+          motivo: motivo || "Cancelado por administración",
+        }),
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
     }
 
-    return { id, estado: 'CANCELADO', message: `Torneo "${torneo.nombre}" cancelado y archivado exitosamente para preservar su historial.` };
+    return {
+      id,
+      estado: "CANCELADO",
+      message: `Torneo "${torneo.nombre}" cancelado y archivado exitosamente para preservar su historial.`,
+    };
   }
 }
 
