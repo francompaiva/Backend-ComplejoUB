@@ -129,62 +129,163 @@ export class TorneosService {
 
   /**
    * RF-09: Generación automática de fixture Round-Robin
-   * Cierra inscripciones, genera cruces de liga todos contra todos.
-   * Si la cantidad de equipos es impar, asigna una fecha libre rotativa dejando rival en null.
+   * Cierra inscripciones, genera cruces de liga todos contra todos en transacción atómica.
    */
-  async generarFixture(torneoId: number, adminId: number, fechaInicioStr?: string) {
+  async generarFixture(
+    torneoId: number,
+    adminId: number,
+    fechaInicioStr?: string,
+  ) {
+    const normalizeSport = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+    const formatLocalDate = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    };
     const torneo = await this.getById(torneoId);
     if (!torneo) {
-      throw new AppError('Torneo no encontrado', 404);
+      throw new AppError("Torneo no encontrado", 404);
     }
-
-    // Regla de dominio: Inmutabilidad de Fixture en torneos iniciados o en progreso
-    if (
-      torneo.estado === 'EN_CURSO' ||
-      torneo.estado === 'FINALIZADO' ||
-      (torneo.estado as string) === 'INICIADO' ||
-      (torneo.estado as string) === 'EN_PROGRESO'
-    ) {
-      throw new AppError('No se puede generar o modificar el fixture de un torneo que ya ha sido iniciado o finalizado (fixture inmutable)', 400);
+    if (torneo.estado !== "INSCRIPCION_ABIERTA") {
+      throw new AppError(
+        "Solo se puede generar el fixture de un torneo con inscripciones abiertas (fixture inmutable)",
+        400,
+      );
     }
-
-    // Obtener equipos inscriptos
+    // Obtener equipos inscriptos y canchas activas del deporte
     let equipos: Array<{ id: number; nombre: string }> = [];
-    if (isDbConnected()) {
-      const pool = getPool()!;
-      const [rows]: any = await pool.query('SELECT id, nombre FROM equipo WHERE fk_torneo_id = ?', [torneoId]);
-      equipos = rows;
-    } else {
-      equipos = store.equipos.filter(e => e.fk_torneo_id === torneoId).map(e => ({ id: e.id, nombre: e.nombre }));
-    }
-
-    if (equipos.length < 2) {
-      throw new AppError('Se necesitan al menos 2 equipos inscriptos para generar el fixture del torneo', 400);
-    }
-
-    // Obtener canchas disponibles para este deporte
     let canchas: Array<{ id: number }> = [];
+    const ocupados = new Set<string>(); // `${canchaId}|${YYYY-MM-DD}|${HH:mm}`
     if (isDbConnected()) {
       const pool = getPool()!;
-      const [cRows]: any = await pool.query('SELECT id FROM cancha WHERE deporte = ? AND activa = true', [torneo.deporte]);
-      canchas = cRows;
+      const [eqRows]: any = await pool.query(
+        "SELECT id, nombre FROM equipo WHERE fk_torneo_id = ? ORDER BY id ASC",
+        [torneoId],
+      );
+      equipos = eqRows;
+      const [cRows]: any = await pool.query(
+        "SELECT id, deporte FROM cancha WHERE activa = true ORDER BY id ASC",
+      );
+      canchas = cRows
+        .filter(
+          (c: any) =>
+            normalizeSport(c.deporte) === normalizeSport(torneo.deporte),
+        )
+        .map((c: any) => ({ id: Number(c.id) }));
     } else {
-      canchas = store.canchas.filter(c => c.deporte === torneo.deporte && c.activa).map(c => ({ id: c.id }));
+      equipos = store.equipos
+        .filter((e) => e.fk_torneo_id === torneoId)
+        .map((e) => ({ id: e.id, nombre: e.nombre }));
+      canchas = store.canchas
+        .filter(
+          (c) =>
+            c.activa &&
+            normalizeSport(c.deporte) === normalizeSport(torneo.deporte),
+        )
+        .map((c) => ({ id: c.id }));
     }
-    const fallbackCanchaId = canchas.length > 0 ? canchas[0].id : 1;
-
+    if (equipos.length < 2) {
+      throw new AppError(
+        "Se necesitan al menos 2 equipos inscriptos para generar el fixture del torneo",
+        400,
+      );
+    }
+    if (canchas.length === 0) {
+      throw new AppError(
+        `No hay canchas activas de ${torneo.deporte} para programar el fixture`,
+        400,
+      );
+    }
     // Algoritmo Round-Robin
     const teamsList = [...equipos];
-    const isOdd = teamsList.length % 2 !== 0;
-    if (isOdd) {
-      // Dummy team para fecha libre
-      teamsList.push({ id: -1, nombre: 'FECHA_LIBRE' });
+    if (teamsList.length % 2 !== 0) {
+      teamsList.push({ id: -1, nombre: "FECHA_LIBRE" });
     }
-
     const n = teamsList.length;
     const totalFechas = n - 1;
     const partidosPorFecha = n / 2;
-
+    const cleanInicio = fechaInicioStr
+      ? fechaInicioStr.includes("T")
+        ? fechaInicioStr.split("T")[0]
+        : fechaInicioStr
+      : formatLocalDate(new Date());
+    const [iy, im, iday] = cleanInicio.split("-").map(Number);
+    const baseDate = new Date(iy, im - 1, iday);
+    if (Number.isNaN(baseDate.getTime())) {
+      throw new AppError("Fecha de inicio inválida para el fixture", 400);
+    }
+    // Ajustar fecha base al sábado correspondiente (RF-06)
+    const dow = baseDate.getDay();
+    if (dow !== 6) {
+      const daysUntilSaturday = (6 - dow + 7) % 7;
+      baseDate.setDate(baseDate.getDate() + daysUntilSaturday);
+    }
+    const canchaIds = canchas.map((c) => c.id);
+    const minFecha = formatLocalDate(baseDate);
+    const maxDate = new Date(baseDate);
+    maxDate.setDate(maxDate.getDate() + (totalFechas + 4) * 7);
+    const maxFecha = formatLocalDate(maxDate);
+    // Pre-cargar turnos ocupados por otros torneos o reservas confirmadas
+    if (isDbConnected()) {
+      const pool = getPool()!;
+      const placeholders = canchaIds.map(() => "?").join(",");
+      const [partRows]: any = await pool.query(
+        `SELECT fk_cancha_id, DATE_FORMAT(fecha, '%Y-%m-%d') AS fecha_str, TIME_FORMAT(hora, '%H:%i') AS hora_str
+         FROM partido
+         WHERE fk_torneo_id <> ? AND fk_cancha_id IN (${placeholders}) AND fecha BETWEEN ? AND ?`,
+        [torneoId, ...canchaIds, minFecha, maxFecha],
+      );
+      for (const r of partRows) {
+        ocupados.add(`${r.fk_cancha_id}|${r.fecha_str}|${r.hora_str}`);
+      }
+      const [resRows]: any = await pool.query(
+        `SELECT fk_cancha_id, DATE_FORMAT(fecha, '%Y-%m-%d') AS fecha_str, TIME_FORMAT(hora, '%H:%i') AS hora_str
+         FROM reserva
+         WHERE estado = 'CONFIRMADA' AND fk_cancha_id IN (${placeholders}) AND fecha BETWEEN ? AND ?`,
+        [...canchaIds, minFecha, maxFecha],
+      );
+      for (const r of resRows) {
+        ocupados.add(`${r.fk_cancha_id}|${r.fecha_str}|${r.hora_str}`);
+      }
+    } else {
+      for (const p of store.partidos) {
+        if (
+          p.fk_torneo_id !== torneoId &&
+          p.fk_cancha_id &&
+          canchaIds.includes(p.fk_cancha_id)
+        ) {
+          ocupados.add(
+            `${p.fk_cancha_id}|${p.fecha}|${String(p.hora).slice(0, 5)}`,
+          );
+        }
+      }
+      for (const r of store.reservas) {
+        if (r.estado === "CONFIRMADA" && canchaIds.includes(r.fk_cancha_id)) {
+          ocupados.add(
+            `${r.fk_cancha_id}|${r.fecha}|${String(r.hora).slice(0, 5)}`,
+          );
+        }
+      }
+    }
+    const buscarSlotLibre = (fechaStr: string) => {
+      for (let h = 18; h <= 23; h++) {
+        const hhmm = `${String(h).padStart(2, "0")}:00`;
+        for (const cId of canchaIds) {
+          const key = `${cId}|${fechaStr}|${hhmm}`;
+          if (!ocupados.has(key)) {
+            ocupados.add(key);
+            return { canchaId: cId, hora: `${hhmm}:00` };
+          }
+        }
+      }
+      return null;
+    };
     const fixtureGenerated: Array<{
       torneoId: number;
       canchaId: number | null;
@@ -193,110 +294,125 @@ export class TorneosService {
       numeroFecha: number;
       fecha: string;
       hora: string;
-      estado: 'PROGRAMADO';
+      estado: "PROGRAMADO";
     }> = [];
-
-    const baseDate = fechaInicioStr ? new Date(fechaInicioStr + 'T00:00:00') : new Date();
-    // Ajustar la fecha base al próximo sábado para cumplir regla RF-06 de torneos de fin de semana
-    const day = baseDate.getDay();
-    if (day !== 0 && day !== 6) {
-      const daysUntilSaturday = (6 - day + 7) % 7;
-      baseDate.setDate(baseDate.getDate() + daysUntilSaturday);
-    }
-
-    const canchasCount = Math.max(1, canchas.length);
-
     for (let round = 0; round < totalFechas; round++) {
       const roundDate = new Date(baseDate);
-      roundDate.setDate(roundDate.getDate() + round * 7); // Un sábado por fecha
-      const fechaStr = roundDate.toISOString().split('T')[0];
-
-      let playableMatchIndex = 0;
-
+      roundDate.setDate(roundDate.getDate() + round * 7);
+      const fechaStr = formatLocalDate(roundDate);
       for (let match = 0; match < partidosPorFecha; match++) {
         const homeIdx = (round + match) % (n - 1);
         let awayIdx = (n - 1 - match + round) % (n - 1);
-        if (match === 0) {
-          awayIdx = n - 1;
-        }
-
+        if (match === 0) awayIdx = n - 1;
         const teamA = teamsList[homeIdx];
         const teamB = teamsList[awayIdx];
-
-        // Determinar local y visitante (o fecha libre)
-        if (teamA.id === -1) {
-          // teamB tiene fecha libre -> no ocupa cancha ni bloquea turno
+        if (teamA.id === -1 || teamB.id === -1) {
+          const teamReal = teamA.id === -1 ? teamB : teamA;
           fixtureGenerated.push({
             torneoId,
             canchaId: null,
-            localId: teamB.id,
-            visitanteId: null, // Fecha Libre
+            localId: teamReal.id,
+            visitanteId: null,
             numeroFecha: round + 1,
             fecha: fechaStr,
-            hora: '18:00:00',
-            estado: 'PROGRAMADO',
-          });
-        } else if (teamB.id === -1) {
-          // teamA tiene fecha libre -> no ocupa cancha ni bloquea turno
-          fixtureGenerated.push({
-            torneoId,
-            canchaId: null,
-            localId: teamA.id,
-            visitanteId: null, // Fecha Libre
-            numeroFecha: round + 1,
-            fecha: fechaStr,
-            hora: '18:00:00',
-            estado: 'PROGRAMADO',
+            hora: "18:00:00",
+            estado: "PROGRAMADO",
           });
         } else {
-          // Cruce normal: asignación simultánea en paralelo según canchas disponibles
-          const canchaIdx = playableMatchIndex % canchasCount;
-          const slotIdx = Math.floor(playableMatchIndex / canchasCount);
-          const canchaAsignada = canchas.length > 0 ? canchas[canchaIdx].id : fallbackCanchaId;
-          const horaAsignada = `${(18 + slotIdx).toString().padStart(2, '0')}:00:00`;
-          playableMatchIndex++;
-
+          const slot = buscarSlotLibre(fechaStr);
+          if (!slot) {
+            throw new AppError(
+              `No hay suficientes canchas u horarios libres (18:00–23:00) el sábado ${fechaStr} para programar la Fecha ${round + 1}`,
+              409,
+            );
+          }
           fixtureGenerated.push({
             torneoId,
-            canchaId: canchaAsignada,
+            canchaId: slot.canchaId,
             localId: teamA.id,
             visitanteId: teamB.id,
             numeroFecha: round + 1,
             fecha: fechaStr,
-            hora: horaAsignada,
-            estado: 'PROGRAMADO',
+            hora: slot.hora,
+            estado: "PROGRAMADO",
           });
         }
       }
     }
-
     if (isDbConnected()) {
       const pool = getPool()!;
-      // Actualizar estado del torneo a EN_CURSO
-      await pool.query('UPDATE torneo SET estado = "EN_CURSO" WHERE id = ?', [torneoId]);
-
-      // Eliminar partidos previos si los hubiera
-      await pool.query('DELETE FROM partido WHERE fk_torneo_id = ?', [torneoId]);
-
-      // Insertar nuevos partidos
-      for (const p of fixtureGenerated) {
-        await pool.query(
-          `INSERT INTO partido (fk_torneo_id, fk_cancha_id, fk_equipo_local_id, fk_equipo_visitante_id, numero_fecha, fecha, hora, estado)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'PROGRAMADO')`,
-          [p.torneoId, p.canchaId, p.localId, p.visitanteId, p.numeroFecha, p.fecha, p.hora]
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        // Bloquear fila del torneo hasta terminar todo el fixture
+        const [tRows]: any = await conn.query(
+          "SELECT estado FROM torneo WHERE id = ? FOR UPDATE",
+          [torneoId],
         );
+        if (!tRows || tRows.length === 0) {
+          throw new AppError("Torneo no encontrado", 404);
+        }
+        if (tRows[0].estado !== "INSCRIPCION_ABIERTA") {
+          throw new AppError(
+            "El fixture ya fue generado o el torneo cambió de estado",
+            409,
+          );
+        }
+        await conn.query("DELETE FROM partido WHERE fk_torneo_id = ?", [
+          torneoId,
+        ]);
+        for (const p of fixtureGenerated) {
+          await conn.query(
+            `INSERT INTO partido (fk_torneo_id, fk_cancha_id, fk_equipo_local_id, fk_equipo_visitante_id, numero_fecha, fecha, hora, estado)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'PROGRAMADO')`,
+            [
+              p.torneoId,
+              p.canchaId,
+              p.localId,
+              p.visitanteId,
+              p.numeroFecha,
+              p.fecha,
+              p.hora,
+            ],
+          );
+        }
+        await conn.query(
+          'UPDATE torneo SET estado = "EN_CURSO" WHERE id = ?',
+          [torneoId],
+        );
+        await conn.query(
+          'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "GENERAR_FIXTURE", "torneo", ?, ?)',
+          [
+            adminId,
+            torneoId,
+            JSON.stringify({
+              totalFechas,
+              totalPartidos: fixtureGenerated.length,
+            }),
+          ],
+        );
+        await conn.commit();
+      } catch (err: any) {
+        await conn.rollback();
+        if (err?.code === "ER_DUP_ENTRY") {
+          throw new AppError(
+            "Conflicto de horario en cancha al guardar el fixture. Reintentá nuevamente.",
+            409,
+          );
+        }
+        throw err;
+      } finally {
+        conn.release();
       }
-
-      await pool.query(
-        'INSERT INTO audit_log (fk_usuario_id, accion, entidad_afectada, entidad_id, detalles) VALUES (?, "GENERAR_FIXTURE", "torneo", ?, ?)',
-        [adminId, torneoId, JSON.stringify({ totalFechas, totalPartidos: fixtureGenerated.length })]
-      );
     } else {
-      torneo.estado = 'EN_CURSO';
-      // Limpiar partidos previos del torneo
-      store.partidos = store.partidos.filter(p => p.fk_torneo_id !== torneoId);
-
-      let nextPartId = store.partidos.length > 0 ? Math.max(...store.partidos.map(p => p.id)) + 1 : 1;
+      torneo.estado = "EN_CURSO";
+      store.partidos = store.partidos.filter(
+        (p) => p.fk_torneo_id !== torneoId,
+      );
+      let nextPartId =
+        store.partidos.length > 0
+          ? Math.max(...store.partidos.map((p) => p.id)) + 1
+          : 1;
       for (const p of fixtureGenerated) {
         store.partidos.push({
           id: nextPartId++,
@@ -308,25 +424,26 @@ export class TorneosService {
           numero_fecha: p.numeroFecha,
           fecha: p.fecha,
           hora: p.hora,
-          estado: 'PROGRAMADO',
+          estado: "PROGRAMADO",
           goles_local: null,
           goles_visitante: null,
           observaciones: null,
         });
       }
-
       store.auditLogs.push({
         id: store.auditLogs.length + 1,
         fk_usuario_id: adminId,
-        accion: 'GENERAR_FIXTURE',
-        entidad_afectada: 'torneo',
+        accion: "GENERAR_FIXTURE",
+        entidad_afectada: "torneo",
         entidad_id: torneoId,
-        detalles: JSON.stringify({ totalFechas, totalPartidos: fixtureGenerated.length }),
-        ip_address: '127.0.0.1',
+        detalles: JSON.stringify({
+          totalFechas,
+          totalPartidos: fixtureGenerated.length,
+        }),
+        ip_address: "127.0.0.1",
         created_at: new Date().toISOString(),
       });
     }
-
     return {
       torneoId,
       nombreTorneo: torneo.nombre,
